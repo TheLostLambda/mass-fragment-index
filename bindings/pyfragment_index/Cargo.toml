@@ -1,0 +1,13 @@
+[package]
+name = "pyfragment_index"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "pyfragment_index"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = {version = "0.18.1", features=["extension-module"]}
+fragment-index-rs = { path = "../../../fragment-index-rs", version = "0.1.0" }

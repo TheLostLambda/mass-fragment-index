@@ -1,0 +1,7 @@
+{
+    "rust-analyzer.linkedProjects": [
+        "./Cargo.toml",
+        "./bindings/pyfragment_index/Cargo.toml"
+    ],
+    "rust-analyzer.showUnlinkedFileNotification": false
+}
