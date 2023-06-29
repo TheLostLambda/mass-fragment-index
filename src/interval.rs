@@ -1,3 +1,5 @@
+use std::ops::Range;
+use std::iter::IntoIterator;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Interval {
@@ -17,7 +19,31 @@ impl Interval {
     pub fn is_empty(&self) -> bool {
         self.start == self.end
     }
+
+    pub fn len(&self) -> usize {
+        self.end - self.start
+    }
 }
+
+
+impl Into<Range<usize>> for Interval {
+    fn into(self) -> Range<usize> {
+        Range { start: self.start, end: self.end}
+    }
+}
+
+
+impl IntoIterator for Interval {
+    type Item = usize;
+
+    type IntoIter = <Range<usize> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        let range: Range<usize> = self.into();
+        range.into_iter()
+    }
+}
+
 
 #[cfg(test)]
 mod test {

@@ -18,9 +18,12 @@ impl Default for SortType {
     }
 }
 
+
+pub type ParentID = usize;
+
 pub trait IndexSortable {
     fn mass(&self) -> f32;
-    fn parent_id(&self) -> usize;
+    fn parent_id(&self) -> ParentID;
 }
 
 
@@ -106,51 +109,13 @@ impl<T: IndexSortable> IndexBin<T> {
         self.entries.iter_mut()
     }
 
-    pub fn search_mass(&self, query: f32, error_tolerance: f32, hint_low: Option<usize>, hint_high: Option<usize>) -> Interval {
-        let n = self.entries.len();
-        let mut lo = hint_low.unwrap_or(0);
-        let mut hi = hint_high.unwrap_or(n);
+    pub fn search_mass(&self, query: f32, error_tolerance: f32) -> Interval {
+        let lower_bound = query - query * error_tolerance;
+        let lower_i = self.entries.partition_point(|entry| entry.mass() <= lower_bound);
+        let upper_bound = query + query * error_tolerance;
+        let upper_i = self.entries[lower_i..self.len()].partition_point(|entry| entry.mass() <= upper_bound) + lower_i;
 
-        let mut out = Interval::new(lo, hi);
-
-        while hi != lo {
-            let mid = (hi + lo) / 2 as usize;
-            let x = self.entries[mid].mass();
-            let err = (x - query) / query;
-            if lo == hi - 1 || err.abs() <= error_tolerance {
-                let mut i = mid;
-                while i != usize::MAX {
-                    let x = self.entries[i].mass();
-                    if (x - query).abs() / query > error_tolerance {
-                        i += 1;
-                        break;
-                    }
-                    if i == 0 {
-                        break;
-                    } else {
-                        i -= 1;
-                    }
-                }
-                out.start = i;
-                i = mid;
-                while i < n {
-                    let x = self.entries[i].mass();
-                    if (x - query).abs() / query > error_tolerance {
-                        break;
-                    }
-                    i += 1;
-                }
-                i += 1;
-                out.end = (i).min(n);
-                return out;
-            }
-            else if err > 0f32 {
-                hi = mid;
-            } else if err < 0f32 {
-                lo = mid;
-            }
-        }
-        return out
+        return Interval::new(lower_i, upper_i);
     }
 
     pub fn search_parent_id(&self, parent_id_range: Interval) -> Interval {
@@ -164,8 +129,9 @@ impl<T: IndexSortable> IndexBin<T> {
         while index >= 1 && index < self.len() {
             if parent_id_range.contains(self.entries[index - 1].parent_id()) {
                 index -= 1;
+            } else {
+                break;
             }
-            break;
         }
         result.start = index;
 
@@ -175,11 +141,12 @@ impl<T: IndexSortable> IndexBin<T> {
             Err(location) => location
         };
 
-        while index < self.len() {
+        while index + 1 < self.len() {
             if parent_id_range.contains(self.entries[index + 1].parent_id()) {
                 index += 1;
+            } else {
+                break;
             }
-            break;
         }
         result.end = index;
 
@@ -215,11 +182,11 @@ mod test {
         parent_list.sort(SortType::ByMass);
         assert!(parent_list.len() == 4);
 
-        let search_out = parent_list.search_mass(2300.0, 5e-6, None, None);
+        let search_out = parent_list.search_mass(2300.01, 5e-6);
         assert!(search_out.start == 0);
         assert!(search_out.end == 1);
 
-        let search_out = parent_list.search_mass(2401.0, 5e-6, None, None);
+        let search_out = parent_list.search_mass(2401.0, 5e-6);
         assert!(search_out.start == 2);
         assert!(search_out.end == 3);
     }

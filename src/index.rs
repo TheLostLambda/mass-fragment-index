@@ -4,16 +4,15 @@ use crate::interval::Interval;
 use crate::sort::{IndexBin, IndexSortable, SortType};
 
 #[derive(Debug, Default)]
-pub struct SearchIndex<T: IndexSortable + Default + Debug, P: IndexSortable + Default> {
+pub struct SearchIndex<T: IndexSortable + Default, P: IndexSortable + Default> {
     pub bins: Vec<IndexBin<T>>,
     pub parents: IndexBin<P>,
-    // pub size: usize,
     pub bins_per_dalton: u32,
     pub max_item_mass: f32,
     pub sort_type: SortType,
 }
 
-impl<T: IndexSortable + Default+ Debug, P: IndexSortable + Default> SearchIndex<T, P> {
+impl<T: IndexSortable + Default, P: IndexSortable + Default> SearchIndex<T, P> {
     pub fn empty(bins_per_dalton: u32, max_fragment_size: f32) -> Self {
         let mut inst = Self {
             bins_per_dalton,
@@ -94,8 +93,9 @@ impl<T: IndexSortable + Default+ Debug, P: IndexSortable + Default> SearchIndex<
     }
 
     pub fn parents_for(&self, mass: f32, error_tolerance: f32) -> Interval {
-        self.parents
-            .search_mass(mass, error_tolerance, None, None)
+        let iv = self.parents
+            .search_mass(mass, error_tolerance);
+        iv
     }
 
     pub fn parents_for_range(&self, low: f32, high: f32, error_tolerance: f32) -> Interval {
@@ -149,7 +149,7 @@ impl<T: IndexSortable + Default+ Debug, P: IndexSortable + Default> SearchIndex<
 }
 
 #[derive(Debug, Clone)]
-pub struct SearchIndexSearcher<'a, T: IndexSortable + Default + Debug, P: IndexSortable + Default> {
+pub struct SearchIndexSearcher<'a, T: IndexSortable + Default, P: IndexSortable + Default> {
     index: &'a SearchIndex<T, P>,
     pub query: f32,
     pub error_tolerance: f32,
@@ -161,7 +161,7 @@ pub struct SearchIndexSearcher<'a, T: IndexSortable + Default + Debug, P: IndexS
     pub parent_id_range: Interval,
 }
 
-impl<'a, T: IndexSortable + Default + Debug, P: IndexSortable + Default> SearchIndexSearcher<'a, T, P> {
+impl<'a, T: IndexSortable + Default, P: IndexSortable + Default> SearchIndexSearcher<'a, T, P> {
     pub fn new(
         index: &'a SearchIndex<T, P>,
         query: f32,
@@ -184,7 +184,9 @@ impl<'a, T: IndexSortable + Default + Debug, P: IndexSortable + Default> SearchI
             parent_id_range,
         };
 
+        // println!("Searching for {} in {}-{}", inst.query, inst.low_bin, inst.high_bin);
         inst.initialize_position_range();
+        // println!("{:?} is valid? {}", inst.peek(), inst.is_peek_valid());
         inst
     }
 
@@ -224,7 +226,7 @@ impl<'a, T: IndexSortable + Default + Debug, P: IndexSortable + Default> SearchI
     }
 
     fn _update_position_range_from_mass_sort(&mut self, current_bin: &IndexBin<T>) -> bool {
-        self.bin_position_range = current_bin.search_mass(self.query, self.error_tolerance, None, None);
+        self.bin_position_range = current_bin.search_mass(self.query, self.error_tolerance);
         self.bin_position = self.bin_position_range.start;
         let mut hit = false;
         for i in self.bin_position..current_bin.len() {
@@ -244,10 +246,16 @@ impl<'a, T: IndexSortable + Default + Debug, P: IndexSortable + Default> SearchI
     }
 
     fn _update_position_range_from_parent_id_sort(&mut self, current_bin: &IndexBin<T>) -> bool {
+        // Starting from the start of the bin, walk along it sequentially until we find a
+        // valid entry.
         self.bin_position_range.start = 0;
         self.bin_position_range.end = current_bin.len();
         let mut hit = false;
-        for i in 0..current_bin.len() {
+        let guess_range = current_bin.search_parent_id(self.parent_id_range);
+        let starting_guess = if guess_range.start > 0 {guess_range.start - 1} else { 0 };
+        self.bin_position_range.end = (guess_range.end + 1).min(current_bin.len());
+        self.bin_position_range.start = starting_guess;
+        for i in starting_guess..current_bin.len() {
             if self._test_entry_parent_sort(&current_bin[i]) {
                 self.bin_position_range.start = i;
                 hit = true;
@@ -290,25 +298,29 @@ impl<'a, T: IndexSortable + Default + Debug, P: IndexSortable + Default> SearchI
         (entry_mass - self.query).abs() / self.query < self.error_tolerance
     }
 
-    fn update_bin(&mut self) {
-        while self.current_bin <= self.high_bin {
+    fn update_bin(&mut self) -> bool {
+        let mut hit = false;
+        while (self.current_bin <= self.high_bin) && ((self.current_bin + 1) < self.index.bins.len()) {
             self.current_bin += 1;
             let current_bin = &self.index.bins[self.current_bin];
-            match self.index.sort_type {
+            hit = match self.index.sort_type {
                 SortType::ByMass => {
-                    self._update_position_range_from_mass_sort(current_bin);
+                    self._update_position_range_from_mass_sort(current_bin)
                 }
                 SortType::ByParentId => {
-                    self._update_position_range_from_parent_id_sort(current_bin);
+                    self._update_position_range_from_parent_id_sort(current_bin)
                 }
-                SortType::Unsorted => {}
-            }
+                SortType::Unsorted => {
+                    true
+                }
+            };
+
             self.bin_position = self.bin_position_range.start;
             if self.current_bin_has_more() {
                 break;
             }
         }
-
+        hit
     }
 
     fn next_entry(&mut self) -> Option<&T> {
@@ -345,7 +357,7 @@ impl<'a, T: IndexSortable + Default + Debug, P: IndexSortable + Default> SearchI
         self.bin_position = 0;
         match self.index.sort_type {
             SortType::ByMass => {
-                let result = current_bin.search_mass(self.query, self.error_tolerance, None, None);
+                let result = current_bin.search_mass(self.query, self.error_tolerance);
                 self.bin_position_range = result;
                 if !self.advance() {
                     self.bin_position_range.start = self.bin_position_range.end;
@@ -371,12 +383,13 @@ impl<'a, T: IndexSortable + Default + Debug, P: IndexSortable + Default> SearchI
         }
         self.bin_position = self.bin_position_range.start;
         if self.bin_position == self.bin_position_range.end {
-            if self.current_bin != self.high_bin {
+            if self.current_bin <= self.high_bin {
                 self.current_bin += 1;
                 return self.initialize_position_range();
             }
             return true;
         }
+        // println!("Starting search in bin {} in range {:?}", self.current_bin, self.bin_position_range);
         return false;
     }
 }
@@ -397,7 +410,7 @@ impl<'a, T: IndexSortable + Default + Clone + Debug, P: IndexSortable + Default 
 mod test{
     use super::*;
     use crate::parent::Spectrum;
-    use crate::peak::Peak;
+    use crate::peak::DeconvolutedPeak;
 
     #[test]
     fn test_build() {
@@ -411,13 +424,13 @@ mod test{
         parent_list.sort(SortType::ByMass);
 
         let peaks = vec![
-            Peak::new(251.5, 1, 0.0, 0),
-            Peak::new(251.5, 1, 0.0, 2),
-            Peak::new(251.6, 1, 0.0, 1),
-            Peak::new(303.7, 1, 0.0, 0),
-            Peak::new(501.2, 1, 0.0, 1)
+            DeconvolutedPeak::new(251.5, 1, 0.0, 0),
+            DeconvolutedPeak::new(251.5, 1, 0.0, 2),
+            DeconvolutedPeak::new(251.6, 1, 0.0, 1),
+            DeconvolutedPeak::new(303.7, 1, 0.0, 0),
+            DeconvolutedPeak::new(501.2, 1, 0.0, 1)
         ];
-        let mut index: SearchIndex<Peak, Spectrum> = SearchIndex::empty(10, 1000.0);
+        let mut index: SearchIndex<DeconvolutedPeak, Spectrum> = SearchIndex::empty(10, 1000.0);
         for peak in peaks {
             index.add(peak);
         }
