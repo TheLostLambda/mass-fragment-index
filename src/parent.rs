@@ -1,16 +1,16 @@
-use crate::sort::IndexSortable;
+use crate::sort::{IndexSortable, MassType, ParentID};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct ParentMolecule {
-    pub mass: f32,
-    pub id: usize,
-    pub source_id: usize,
+    pub mass: MassType,
+    pub id: ParentID,
+    pub source_id: ParentID,
     pub start_position: u16,
     pub size: u16,
 }
 
 impl ParentMolecule {
-    pub fn new(mass: f32, id: usize, parent_id: usize, start_position: u16, size: u16) -> Self {
+    pub fn new(mass: MassType, id: ParentID, parent_id: ParentID, start_position: u16, size: u16) -> Self {
         Self {
             mass,
             id,
@@ -22,11 +22,11 @@ impl ParentMolecule {
 }
 
 impl IndexSortable for ParentMolecule {
-    fn mass(&self) -> f32 {
+    fn mass(&self) -> MassType {
         self.mass
     }
 
-    fn parent_id(&self) -> usize {
+    fn parent_id(&self) -> ParentID {
         self.source_id
     }
 }
@@ -34,43 +34,43 @@ impl IndexSortable for ParentMolecule {
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Peptide {
-    pub mass: f32,
-    pub id: usize,
-    pub protein_id: usize,
+    pub mass: MassType,
+    pub id: ParentID,
+    pub protein_id: ParentID,
     pub start_position: u16,
     pub sequence: String,
 }
 
 impl Peptide {
-    pub fn new(mass: f32, id: usize, protein_id: usize, start_position: u16, sequence: String) -> Self { Self { mass, id, protein_id, start_position, sequence } }
+    pub fn new(mass: MassType, id: ParentID, protein_id: ParentID, start_position: u16, sequence: String) -> Self { Self { mass, id, protein_id, start_position, sequence } }
 }
 
 
 impl IndexSortable for Peptide {
-    fn mass(&self) -> f32 {
+    fn mass(&self) -> MassType {
         self.mass
     }
 
-    fn parent_id(&self) -> usize {
-        self.protein_id
+    fn parent_id(&self) -> ParentID {
+        self.protein_id as ParentID
     }
 }
 
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Spectrum {
-    pub precursor_mass: f32,
+    pub precursor_mass: MassType,
     pub precursor_charge: i32,
-    pub source_file_id: usize,
-    pub scan_number: usize,
+    pub source_file_id: ParentID,
+    pub scan_number: ParentID,
 }
 
 impl Spectrum {
     pub fn new(
-        precursor_mass: f32,
+        precursor_mass: MassType,
         precursor_charge: i32,
-        source_file_id: usize,
-        scan_number: usize,
+        source_file_id: ParentID,
+        scan_number: ParentID,
     ) -> Self {
         Self {
             precursor_mass,
@@ -82,11 +82,11 @@ impl Spectrum {
 }
 
 impl IndexSortable for Spectrum {
-    fn mass(&self) -> f32 {
+    fn mass(&self) -> MassType {
         self.precursor_mass
     }
 
-    fn parent_id(&self) -> usize {
+    fn parent_id(&self) -> ParentID {
         self.source_file_id
     }
 }

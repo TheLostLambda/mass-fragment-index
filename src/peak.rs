@@ -1,21 +1,21 @@
-use crate::sort::{IndexSortable, ParentID};
+use crate::sort::{IndexSortable, ParentID, MassType};
 
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct DeconvolutedPeak {
-    pub mass: f32,
+    pub mass: MassType,
     pub charge: i16,
     pub intensity: f32,
-    pub scan_id: ParentID,
+    pub scan_ref: ParentID,
 }
 
 impl IndexSortable for DeconvolutedPeak {
-    fn mass(&self) -> f32 {
+    fn mass(&self) -> MassType {
         self.mass
     }
 
     fn parent_id(&self) -> ParentID {
-        self.scan_id
+        self.scan_ref
     }
 }
 
@@ -26,12 +26,12 @@ impl PartialOrd for DeconvolutedPeak {
 }
 
 impl DeconvolutedPeak {
-    pub fn new(mass: f32, charge: i16, intensity: f32, scan_id: ParentID) -> Self {
+    pub fn new(mass: MassType, charge: i16, intensity: f32, scan_ref: ParentID) -> Self {
         Self {
             mass,
             charge,
             intensity,
-            scan_id: scan_id,
+            scan_ref,
         }
     }
 }
@@ -39,18 +39,18 @@ impl DeconvolutedPeak {
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct MZPeak {
-    pub mz: f32,
+    pub mz: MassType,
     pub intensity: f32,
-    pub scan_id: ParentID,
+    pub scan_ref: ParentID,
 }
 
 impl IndexSortable for MZPeak {
-    fn mass(&self) -> f32 {
+    fn mass(&self) -> MassType {
         self.mz
     }
 
     fn parent_id(&self) -> ParentID {
-        self.scan_id
+        self.scan_ref
     }
 }
 
@@ -61,11 +61,11 @@ impl PartialOrd for MZPeak {
 }
 
 impl MZPeak {
-    pub fn new(mz: f32 , intensity: f32, scan_id: ParentID) -> Self {
+    pub fn new(mz: MassType , intensity: f32, scan_ref: ParentID) -> Self {
         Self {
             mz,
             intensity,
-            scan_id: scan_id,
+            scan_ref,
         }
     }
 }
@@ -83,7 +83,7 @@ mod test {
         let peak = DeconvolutedPeak::new(256.03, 1, 0.0, 300);
         assert!(peak.mass == 256.03);
         assert!(peak.mass() == 256.03);
-        assert!(peak.scan_id == 300);
+        assert!(peak.scan_ref == 300);
         assert!(peak.parent_id() == 300);
     }
 }

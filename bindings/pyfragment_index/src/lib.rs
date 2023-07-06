@@ -4,21 +4,24 @@ use pyo3::exceptions::PyValueError;
 use pyo3::pyclass::CompareOp;
 use pyo3::types::{PyFloat, PyType};
 
-use fragment_index_rs::fragment::{Fragment as _Fragment, FragmentSeries};
+use fragment_index_rs::fragment::{Fragment, FragmentSeries};
 use fragment_index_rs::index::{SearchIndex};
-use fragment_index_rs::interval::Interval as _Interval;
-use fragment_index_rs::parent::Peptide as _Peptide;
-use fragment_index_rs::sort::{SortType, ParentID};
+use fragment_index_rs::interval::Interval;
+use fragment_index_rs::parent::{Peptide, Spectrum};
+use fragment_index_rs::sort::{SortType, ParentID, MassType, Tolerance};
+
+use fragment_index_rs::peak::{DeconvolutedPeak};
 
 
-#[pyclass]
+#[pyclass(name="Fragment", module="pyfragment_index")]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct Fragment(_Fragment);
+#[pyo3(text_signature = "(mass, parent_id, ordinal, series)")]
+pub struct PyFragment(Fragment);
 
 #[pymethods]
-impl Fragment {
+impl PyFragment {
     #[new]
-    fn init(mass: f32, parent_id: ParentID, ordinal: u16, series: &str) -> PyResult<Self> {
+    fn new(mass: MassType, parent_id: ParentID, ordinal: u16, series: &str) -> PyResult<Self> {
         let series = match series {
             "b" => FragmentSeries::b,
             "y" => FragmentSeries::y,
@@ -28,11 +31,11 @@ impl Fragment {
             "x" => FragmentSeries::x,
             _ => return Err(PyValueError::new_err("Unknown fragment series")),
         };
-        Ok(Self(_Fragment::new(mass, parent_id, series, ordinal)))
+        Ok(Self(Fragment::new(mass, parent_id, series, ordinal)))
     }
 
     #[getter]
-    fn mass(&self) -> f32 {
+    fn mass(&self) -> MassType {
         self.0.mass
     }
 
@@ -81,51 +84,52 @@ impl Fragment {
     }
 }
 
-impl Into<_Fragment> for Fragment {
-    fn into(self) -> _Fragment {
+impl Into<Fragment> for PyFragment {
+    fn into(self) -> Fragment {
         self.0
     }
 }
 
-impl From<_Fragment> for Fragment {
-    fn from(value: _Fragment) -> Self {
+impl From<Fragment> for PyFragment {
+    fn from(value: Fragment) -> Self {
         Self(value)
     }
 }
 
-impl AsRef<_Fragment> for Fragment {
-    fn as_ref(&self) -> &_Fragment {
+impl AsRef<Fragment> for PyFragment {
+    fn as_ref(&self) -> &Fragment {
         &self.0
     }
 }
 
-#[pyclass]
+#[pyclass(name="Interval", module="pyfragment_index")]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct Interval(_Interval);
+#[pyo3(text_signature = "(start, end)")]
+pub struct PyInterval(Interval);
 
-impl From<_Interval> for Interval {
-    fn from(value: _Interval) -> Self {
+impl From<Interval> for PyInterval {
+    fn from(value: Interval) -> Self {
         Self(value)
     }
 }
 
-impl Into<_Interval> for Interval {
-    fn into(self) -> _Interval {
+impl Into<Interval> for PyInterval {
+    fn into(self) -> Interval {
         self.0
     }
 }
 
-impl AsRef<_Interval> for Interval {
-    fn as_ref(&self) -> &_Interval {
+impl AsRef<Interval> for PyInterval {
+    fn as_ref(&self) -> &Interval {
         &self.0
     }
 }
 
 #[pymethods]
-impl Interval {
+impl PyInterval {
     #[new]
     pub fn new(start: usize, end: usize) -> Self {
-        _Interval::new(start, end).into()
+        Interval::new(start, end).into()
     }
 
     #[getter]
@@ -163,34 +167,34 @@ impl Interval {
     }
 }
 
-#[pyclass]
+#[pyclass(name="Peptide", module="pyfragment_index")]
 #[derive(Debug, Default, Clone, PartialEq)]
 #[pyo3(text_signature = "(mass, id, protein_id, start_position, sequence)")]
-pub struct Peptide(_Peptide);
+pub struct PyPeptide(Peptide);
 
-impl AsRef<_Peptide> for Peptide {
-    fn as_ref(&self) -> &_Peptide {
+impl AsRef<Peptide> for PyPeptide {
+    fn as_ref(&self) -> &Peptide {
         &self.0
     }
 }
 
-impl From<_Peptide> for Peptide {
-    fn from(value: _Peptide) -> Self {
+impl From<Peptide> for PyPeptide {
+    fn from(value: Peptide) -> Self {
         Self(value)
     }
 }
 
-impl Into<_Peptide> for Peptide {
-    fn into(self) -> _Peptide {
+impl Into<Peptide> for PyPeptide {
+    fn into(self) -> Peptide {
         self.0
     }
 }
 
 #[pymethods]
-impl Peptide {
+impl PyPeptide {
     #[new]
-    fn new(mass: f32, id: ParentID, protein_id: ParentID, start_position: u16, sequence: String) -> Self {
-        Self(_Peptide::new(mass, id, protein_id, start_position, sequence))
+    fn new(mass: MassType, id: ParentID, protein_id: ParentID, start_position: u16, sequence: String) -> Self {
+        Self(Peptide::new(mass, id, protein_id, start_position, sequence))
     }
 
     #[staticmethod]
@@ -207,7 +211,7 @@ impl Peptide {
             let inst = proforma_type.call_method1("parse", (proforma,))?;
             let mass_obj = inst.getattr("mass")?.downcast::<PyFloat>()?;
             let mass = mass_obj.extract()?;
-            let inner = _Peptide::new(mass, id, protein_id, start_position, proforma.to_string());
+            let inner = Peptide::new(mass, id, protein_id, start_position, proforma.to_string());
             Ok(inner.into())
         })
     }
@@ -224,7 +228,7 @@ impl Peptide {
     }
 
     #[getter]
-    fn mass(&self) -> f32 {
+    fn mass(&self) -> MassType {
         self.0.mass
     }
 
@@ -272,30 +276,191 @@ impl Peptide {
     }
 }
 
-#[pyclass]
-#[derive(Debug)]
-pub struct PeptideFragmentIndex(SearchIndex<_Fragment, _Peptide>);
+
+#[pyclass(name="Spectrum", module="pyfragment_index")]
+#[derive(Debug, Default, Clone, PartialEq)]
+#[pyo3(text_signature = "(scan_number, source_file_id, precursor_mass, precursor_charge)")]
+pub struct PySpectrum(Spectrum);
+
+impl AsRef<Spectrum> for PySpectrum {
+    fn as_ref(&self) -> &Spectrum {
+        &self.0
+    }
+}
+
+impl From<Spectrum> for PySpectrum {
+    fn from(value: Spectrum) -> Self {
+        Self(value)
+    }
+}
+
+impl Into<Spectrum> for PySpectrum {
+    fn into(self) -> Spectrum {
+        self.0
+    }
+}
 
 #[pymethods]
-impl PeptideFragmentIndex {
+impl PySpectrum {
     #[new]
-    fn new(bins_per_dalton: u32, max_fragment_size: f32) -> PyResult<Self> {
-        Ok(Self(SearchIndex::empty(bins_per_dalton, max_fragment_size)))
+    fn new(scan_number: ParentID,  source_file_id: ParentID, precursor_mass: MassType, precursor_charge: i32) -> PySpectrum {
+        Spectrum {
+            scan_number,
+            source_file_id,
+            precursor_mass,
+            precursor_charge
+        }.into()
     }
 
-    fn add_parent(&mut self, parent: Peptide) {
+    #[getter]
+    fn precursor_mass(&self) -> MassType {
+        self.0.precursor_mass
+    }
+
+    #[getter]
+    fn scan_number(&self) -> ParentID {
+        self.0.scan_number
+    }
+
+    #[setter]
+    fn set_scan_number(&mut self, value: ParentID) {
+        self.0.scan_number = value;
+    }
+
+    #[getter]
+    fn source_file_id(&self) -> ParentID {
+        self.0.source_file_id
+    }
+
+    #[setter]
+    fn set_source_file_id(&mut self, value: ParentID) {
+        self.0.source_file_id = value
+    }
+
+    #[getter]
+    fn precursor_charge(&self) -> i32 {
+        self.0.precursor_charge
+    }
+
+    #[setter]
+    fn set_precursor_charge(&mut self, value: i32) {
+        self.0.precursor_charge = value
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Spectrum({}, {}, {}, {})",
+            self.0.scan_number,
+            self.0.source_file_id,
+            self.0.precursor_mass,
+            self.0.precursor_charge
+        ).to_string()
+    }
+}
+
+
+#[pyclass(name="Peak", module="pyfragment_index")]
+#[derive(Debug, Default, Clone, PartialEq)]
+#[pyo3(text_signature = "(mass, intensity, charge, scan_ref)")]
+pub struct PyPeak(DeconvolutedPeak);
+
+impl AsRef<DeconvolutedPeak> for PyPeak {
+    fn as_ref(&self) -> &DeconvolutedPeak {
+        &self.0
+    }
+}
+
+impl From<DeconvolutedPeak> for PyPeak {
+    fn from(value: DeconvolutedPeak) -> Self {
+        Self(value)
+    }
+}
+
+impl Into<DeconvolutedPeak> for PyPeak {
+    fn into(self) -> DeconvolutedPeak {
+        self.0
+    }
+}
+
+
+#[pymethods]
+impl PyPeak {
+
+    #[new]
+    fn new(mass: MassType, intensity: f32, charge: i16, scan_ref: ParentID) -> PyPeak {
+        DeconvolutedPeak {
+            mass, intensity, charge, scan_ref
+        }.into()
+    }
+
+    #[getter]
+    fn get_mass(&self) -> MassType {
+        self.0.mass
+    }
+
+    #[getter]
+    fn get_intensity(&self) -> f32 {
+        self.0.intensity
+    }
+
+    #[getter]
+    fn get_charge(&self) -> i16 {
+        self.0.charge
+    }
+
+    #[getter]
+    fn get_scan_ref(&self) -> ParentID {
+        self.0.scan_ref
+    }
+
+    #[setter]
+    fn set_intensity(&mut self, value: f32) {
+        self.0.intensity = value;
+    }
+
+    #[setter]
+    fn set_charge(&mut self, value: i16) {
+        self.0.charge = value;
+    }
+
+    #[setter]
+    fn set_scan_ref(&mut self, value: ParentID) {
+        self.0.scan_ref = value;
+    }
+
+    fn __repr__(&self) -> String {
+        format!("Peak({}, {}, {}, {})", self.0.mass, self.0.intensity, self.0.charge, self.0.scan_ref).to_string()
+    }
+
+}
+
+
+#[pyclass(name="PeptideFragmentIndex", module="pyfragment_index")]
+#[derive(Debug)]
+pub struct PyPeptideFragmentIndex(SearchIndex<Fragment, Peptide>);
+
+#[pymethods]
+impl PyPeptideFragmentIndex {
+    #[new]
+    fn new(bins_per_dalton: u32, maxfragment_size: MassType) -> PyResult<Self> {
+        Ok(Self(SearchIndex::empty(bins_per_dalton, maxfragment_size)))
+    }
+
+    fn add_parent(&mut self, parent: PyPeptide) {
         self.0.add_parent(parent.into())
     }
 
-    fn add(&mut self, fragment: Fragment) {
+    fn add(&mut self, fragment: PyFragment) {
         self.0.add(fragment.into());
     }
 
-    fn parents_for(&self, mass: f32, error_tolerance: f32) -> Interval {
+    fn parents_for(&self, mass: MassType, error_tolerance: MassType) -> PyInterval {
+        let error_tolerance = Tolerance::PPM(error_tolerance);
         self.0.parents_for(mass, error_tolerance).into()
     }
 
-    fn parents_for_range(&self, low: f32, high: f32, error_tolerance: f32) -> Interval {
+    fn parents_for_range(&self, low: MassType, high: MassType, error_tolerance: MassType) -> PyInterval {
+        let error_tolerance = Tolerance::PPM(error_tolerance);
         self.0.parents_for_range(low, high, error_tolerance).into()
     }
 
@@ -313,32 +478,101 @@ impl PeptideFragmentIndex {
         self.0.sort(SortType::ByParentId)
     }
 
-    fn search(&self, query: f32, error_tolerance: f32, parent_interval: Option<Interval>) -> Vec<Fragment> {
-        let parent_interval: Option<_Interval> = match parent_interval {
+    fn search(&self, query: MassType, error_tolerance: MassType, parentinterval: Option<PyInterval>) -> Vec<PyFragment> {
+        let error_tolerance = Tolerance::PPM(error_tolerance);
+        let parentinterval: Option<Interval> = match parentinterval {
             Some(iv) => {
                 Some(iv.as_ref().clone())
             },
             None => None
         };
 
-        let searcher = self.0.search(query, error_tolerance, parent_interval);
+        let searcher = self.0.search(query, error_tolerance, parentinterval);
         searcher.into_iter().map(|f| f.into()).collect()
     }
 }
 
-impl AsRef<SearchIndex<_Fragment, _Peptide>> for PeptideFragmentIndex {
-    fn as_ref(&self) -> &SearchIndex<_Fragment, _Peptide> {
+impl AsRef<SearchIndex<Fragment, Peptide>> for PyPeptideFragmentIndex {
+    fn as_ref(&self) -> &SearchIndex<Fragment, Peptide> {
         &self.0
     }
 }
 
 
+#[pyclass(name="PeakIndex", module="pyfragment_index")]
+#[derive(Debug)]
+pub struct PyPeakIndex(SearchIndex<DeconvolutedPeak, Spectrum>);
+
+#[pymethods]
+impl PyPeakIndex {
+    #[new]
+    fn new(bins_per_dalton: u32, maxfragment_size: MassType) -> PyResult<Self> {
+        Ok(Self(SearchIndex::empty(bins_per_dalton, maxfragment_size)))
+    }
+
+    fn add_parent(&mut self, parent: PySpectrum) {
+        self.0.add_parent(parent.into())
+    }
+
+    fn add(&mut self, peak: PyPeak) {
+        self.0.add(peak.into());
+    }
+
+    fn parents_for(&self, mass: MassType, error_tolerance: MassType) -> PyInterval {
+        let error_tolerance = Tolerance::PPM(error_tolerance);
+        self.0.parents_for(mass, error_tolerance).into()
+    }
+
+    fn parents_for_range(&self, low: MassType, high: MassType, error_tolerance: MassType) -> PyInterval {
+        let error_tolerance = Tolerance::PPM(error_tolerance);
+        self.0.parents_for_range(low, high, error_tolerance).into()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "PeakIndex({} peaks, {} spectra, sorted={})",
+            self.0.bins.iter().map(|b| b.len()).sum::<usize>(),
+            self.0.parents.len(),
+            matches!(self.0.sort_type, SortType::ByParentId)
+        )
+        .to_string()
+    }
+
+    fn sort(&mut self) {
+        self.0.sort(SortType::ByParentId)
+    }
+
+    fn search(&self, query: MassType, error_tolerance: MassType, parentinterval: Option<PyInterval>) -> Vec<PyPeak> {
+        let error_tolerance = Tolerance::PPM(error_tolerance);
+        let parentinterval: Option<Interval> = match parentinterval {
+            Some(iv) => {
+                Some(iv.as_ref().clone())
+            },
+            None => None
+        };
+
+        let searcher = self.0.search(query, error_tolerance, parentinterval);
+        searcher.into_iter().map(|f| f.into()).collect()
+    }
+}
+
+impl AsRef<SearchIndex<DeconvolutedPeak, Spectrum>> for PyPeakIndex {
+    fn as_ref(&self) -> &SearchIndex<DeconvolutedPeak, Spectrum> {
+        &self.0
+    }
+}
+
 /// A Python module implemented in Rust.
 #[pymodule]
 fn pyfragment_index(_py: Python, m: &PyModule) -> PyResult<()> {
-    m.add_class::<Fragment>()?;
-    m.add_class::<Interval>()?;
-    m.add_class::<Peptide>()?;
-    m.add_class::<PeptideFragmentIndex>()?;
+    m.add_class::<PyInterval>()?;
+
+    m.add_class::<PyFragment>()?;
+    m.add_class::<PyPeptide>()?;
+    m.add_class::<PyPeptideFragmentIndex>()?;
+
+    m.add_class::<PyPeak>()?;
+    m.add_class::<PySpectrum>()?;
+    m.add_class::<PyPeakIndex>()?;
     Ok(())
 }

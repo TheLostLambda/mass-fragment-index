@@ -1,7 +1,7 @@
 
 use std::{str::FromStr, error::Error, fmt::Display};
 
-use crate::sort::{IndexSortable, ParentID};
+use crate::sort::{IndexSortable, ParentID, MassType};
 
 #[allow(non_snake_case, non_camel_case_types)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -81,7 +81,7 @@ impl Default for FragmentSeries {
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Fragment {
-    pub mass: f32,
+    pub mass: MassType,
     pub parent_id: ParentID,
     pub series: FragmentSeries,
     pub ordinal: u16,
@@ -89,7 +89,7 @@ pub struct Fragment {
 
 
 impl IndexSortable for Fragment {
-    fn mass(&self) -> f32 {
+    fn mass(&self) -> MassType {
         self.mass
     }
 
@@ -99,7 +99,7 @@ impl IndexSortable for Fragment {
 }
 
 impl Fragment {
-    pub fn new(mass: f32, parent_id: ParentID, series: FragmentSeries, ordinal: u16) -> Self {
+    pub fn new(mass: MassType, parent_id: ParentID, series: FragmentSeries, ordinal: u16) -> Self {
         Self {
             mass,
             parent_id,

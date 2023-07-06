@@ -32,6 +32,18 @@ impl Into<Range<usize>> for Interval {
     }
 }
 
+impl From<(usize, usize)> for Interval {
+    fn from(value: (usize, usize)) -> Self {
+        Self::new(value.0, value.1)
+    }
+}
+
+impl From<Interval> for (usize, usize) {
+    fn from(value: Interval) -> Self {
+        (value.start, value.end)
+    }
+}
+
 
 impl IntoIterator for Interval {
     type Item = usize;
