@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 
 use crate::fragment::{Fragment, FragmentSeries};
-use crate::index::{SearchIndex};
+use crate::index::SearchIndex;
 use crate::sort::{IndexSortable, MassType, ParentID, Tolerance};
 
 #[derive(Debug, Clone, Copy)]
@@ -92,7 +92,6 @@ impl IndexMatcher {
             for hit in index.search(*mass, self.tolerance, Some(parent_interval)) {
                 match matches.entry(hit.parent_id()) {
                     Entry::Occupied(mut entry) => {
-                        // entry.get_mut().push(hit);
                         entry.get_mut().add(hit, *intensity);
                     },
                     Entry::Vacant(entry) => {

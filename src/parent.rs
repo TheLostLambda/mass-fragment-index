@@ -1,6 +1,10 @@
+#[cfg(feature = "serde")]
+use serde::{Serialize, Deserialize};
+
 use crate::sort::{IndexSortable, MassType, ParentID};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ParentMolecule {
     pub mass: MassType,
     pub id: ParentID,
@@ -33,6 +37,7 @@ impl IndexSortable for ParentMolecule {
 
 
 #[derive(Debug, Clone, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Peptide {
     pub mass: MassType,
     pub id: ParentID,
@@ -58,6 +63,7 @@ impl IndexSortable for Peptide {
 
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Spectrum {
     pub precursor_mass: MassType,
     pub precursor_charge: i32,

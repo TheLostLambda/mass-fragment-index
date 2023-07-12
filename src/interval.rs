@@ -1,7 +1,12 @@
 use std::ops::Range;
 use std::iter::IntoIterator;
 
+#[cfg(feature = "serde")]
+use serde::{Serialize, Deserialize};
+
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Interval {
     pub start: usize,
     pub end: usize,

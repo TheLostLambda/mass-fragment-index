@@ -4,13 +4,13 @@ use pyo3::exceptions::PyValueError;
 use pyo3::pyclass::CompareOp;
 use pyo3::types::{PyFloat, PyType};
 
-use fragment_index_rs::fragment::{Fragment, FragmentSeries};
-use fragment_index_rs::index::{SearchIndex};
-use fragment_index_rs::interval::Interval;
-use fragment_index_rs::parent::{Peptide, Spectrum};
-use fragment_index_rs::sort::{SortType, ParentID, MassType, Tolerance};
+use mass_fragment_index::fragment::{Fragment, FragmentSeries};
+use mass_fragment_index::index::{SearchIndex};
+use mass_fragment_index::interval::Interval;
+use mass_fragment_index::parent::{Peptide, Spectrum};
+use mass_fragment_index::sort::{SortType, ParentID, MassType, Tolerance};
 
-use fragment_index_rs::peak::{DeconvolutedPeak};
+use mass_fragment_index::peak::{DeconvolutedPeak};
 
 
 #[pyclass(name="Fragment", module="pyfragment_index")]

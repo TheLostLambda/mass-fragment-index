@@ -1,10 +1,14 @@
-
 use std::{str::FromStr, error::Error, fmt::Display};
+
+#[cfg(feature = "serde")]
+use serde::{Serialize, Deserialize};
+
 
 use crate::sort::{IndexSortable, ParentID, MassType};
 
 #[allow(non_snake_case, non_camel_case_types)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum FragmentSeries {
     b,
     y,
@@ -80,6 +84,7 @@ impl Default for FragmentSeries {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Fragment {
     pub mass: MassType,
     pub parent_id: ParentID,

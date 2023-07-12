@@ -1,5 +1,5 @@
 [package]
-name = "fragment-index-rs"
+name = "mass-fragment-index"
 version = "0.1.0"
 edition = "2021"
 
@@ -13,5 +13,10 @@ csv = "1.2.2"
 pretty_assertions = "1.3.0"
 rand = "0.8.5"
 
+[features]
+default = ["serialize"]
+serialize = ["serde", ]
+
 [dependencies]
 rayon = "1.7.0"
+serde = { version = "1.0.171", optional = true , features = ["derive"]}

@@ -1,6 +1,9 @@
 
 use std::{ops::{Index, Mul}, str::FromStr, error::Error, fmt::Display};
 
+#[cfg(feature = "serde")]
+use serde::{Serialize, Deserialize};
+
 use crate::interval::Interval;
 
 
@@ -25,6 +28,7 @@ pub fn aboutzero(x: MassType) -> bool
 
 
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum SortType {
     ByMass,
     ByParentId,
@@ -40,6 +44,7 @@ impl Default for SortType {
 
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Tolerance {
     PPM(MassType),
     Da(MassType)
@@ -137,6 +142,7 @@ pub trait IndexSortable {
 
 
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct IndexBin<T: IndexSortable> {
     pub entries: Vec<T>,
     pub sort_type: SortType,

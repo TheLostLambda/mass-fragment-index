@@ -5,10 +5,10 @@ use csv;
 use rand::Rng;
 use rayon::prelude::*;
 
-use fragment_index_rs::fragment::{Fragment, FragmentName};
-use fragment_index_rs::index::SearchIndex;
-use fragment_index_rs::parent::Peptide;
-use fragment_index_rs::sort::{MassType, Tolerance, IndexSortable, ParentID};
+use mass_fragment_index::fragment::{Fragment, FragmentName};
+use mass_fragment_index::index::SearchIndex;
+use mass_fragment_index::parent::Peptide;
+use mass_fragment_index::sort::{MassType, Tolerance, IndexSortable, ParentID, SortType};
 
 fn parse_csv<R: io::BufRead>(reader: R) -> io::Result<Vec<(Peptide, Vec<Fragment>)>> {
     let mut csv_reader = csv::Reader::from_reader(reader);
@@ -66,7 +66,7 @@ fn build_index<R: io::BufRead>(reader: R) -> io::Result<SearchIndex<Fragment, Pe
         });
     });
 
-    search_index.sort(fragment_index_rs::sort::SortType::ByParentId);
+    search_index.sort(SortType::ByParentId);
     Ok(search_index)
 }
 

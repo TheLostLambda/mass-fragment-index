@@ -1,9 +1,11 @@
-use std::fmt::Debug;
+#[cfg(feature = "serde")]
+use serde::{Serialize, Deserialize};
 
 use crate::interval::Interval;
 use crate::sort::{IndexBin, IndexSortable, MassType, SortType, Tolerance};
 
 #[derive(Debug, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SearchIndex<T: IndexSortable + Default, P: IndexSortable + Default> {
     pub bins: Vec<IndexBin<T>>,
     pub parents: IndexBin<P>,

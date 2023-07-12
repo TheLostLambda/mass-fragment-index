@@ -1,7 +1,11 @@
+#[cfg(feature = "serde")]
+use serde::{Serialize, Deserialize};
+
 use crate::sort::{IndexSortable, ParentID, MassType};
 
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DeconvolutedPeak {
     pub mass: MassType,
     pub charge: i16,
@@ -38,6 +42,7 @@ impl DeconvolutedPeak {
 
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct MZPeak {
     pub mz: MassType,
     pub intensity: f32,
