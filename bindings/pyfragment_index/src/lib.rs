@@ -2,7 +2,7 @@
 use pyo3::prelude::*;
 use pyo3::exceptions::PyValueError;
 use pyo3::pyclass::CompareOp;
-use pyo3::types::{PyFloat, PyType};
+use pyo3::types::{PyFloat, PyType, PyBytes};
 
 use mass_fragment_index::fragment::{Fragment, FragmentSeries};
 use mass_fragment_index::index::{SearchIndex};
@@ -11,6 +11,8 @@ use mass_fragment_index::parent::{Peptide, Spectrum};
 use mass_fragment_index::sort::{SortType, ParentID, MassType, Tolerance};
 
 use mass_fragment_index::peak::{DeconvolutedPeak};
+
+use rmp_serde;
 
 
 #[pyclass(name="Fragment", module="pyfragment_index")]
@@ -490,6 +492,46 @@ impl PyPeptideFragmentIndex {
         let searcher = self.0.search(query, error_tolerance, parentinterval);
         searcher.into_iter().map(|f| f.into()).collect()
     }
+
+    pub fn __getstate__<'py>(&self, py: Python<'py>) -> PyResult<&'py PyBytes> {
+        match rmp_serde::to_vec(&self.0) {
+            Ok(payload) => {
+                match zstd::bulk::compress(&payload, 0) {
+                    Ok(payload) => Ok(PyBytes::new(py, &payload)),
+                    Err(err) => Err(PyValueError::new_err(err.to_string()))
+                }
+            },
+            Err(err) => {
+                Err(PyValueError::new_err(err.to_string()))
+            }
+        }
+
+    }
+
+    pub fn __setstate__(&mut self, state: &PyBytes) -> PyResult<()> {
+        let buf = state.as_bytes();
+        match zstd::Decoder::new(std::io::BufReader::new(buf)) {
+            Ok(decoder) => {
+                match rmp_serde::from_read(decoder) {
+                    Ok(inst) => {
+                        self.0 = inst;
+                        Ok(())
+                    },
+                    Err(err) => {
+                        Err(PyValueError::new_err(err.to_string()))
+                    }
+                }
+            },
+            Err(err) => {
+                Err(PyValueError::new_err(err.to_string()))
+            }
+        }
+    }
+
+    pub fn __getnewargs__(&self) -> PyResult<(u32, MassType)> {
+        Ok((self.0.bins_per_dalton, self.0.max_item_mass))
+    }
+
 }
 
 impl AsRef<SearchIndex<Fragment, Peptide>> for PyPeptideFragmentIndex {
@@ -508,6 +550,45 @@ impl PyPeakIndex {
     #[new]
     fn new(bins_per_dalton: u32, maxfragment_size: MassType) -> PyResult<Self> {
         Ok(Self(SearchIndex::empty(bins_per_dalton, maxfragment_size)))
+    }
+
+    pub fn __getstate__<'py>(&self, py: Python<'py>) -> PyResult<&'py PyBytes> {
+        match rmp_serde::to_vec(&self.0) {
+            Ok(payload) => {
+                match zstd::bulk::compress(&payload, 0) {
+                    Ok(payload) => Ok(PyBytes::new(py, &payload)),
+                    Err(err) => Err(PyValueError::new_err(err.to_string()))
+                }
+            },
+            Err(err) => {
+                Err(PyValueError::new_err(err.to_string()))
+            }
+        }
+
+    }
+
+    pub fn __setstate__(&mut self, state: &PyBytes) -> PyResult<()> {
+        let buf = state.as_bytes();
+        match zstd::Decoder::new(std::io::BufReader::new(buf)) {
+            Ok(decoder) => {
+                match rmp_serde::from_read(decoder) {
+                    Ok(inst) => {
+                        self.0 = inst;
+                        Ok(())
+                    },
+                    Err(err) => {
+                        Err(PyValueError::new_err(err.to_string()))
+                    }
+                }
+            },
+            Err(err) => {
+                Err(PyValueError::new_err(err.to_string()))
+            }
+        }
+    }
+
+    pub fn __getnewargs__(&self) -> PyResult<(u32, MassType)> {
+        Ok((self.0.bins_per_dalton, self.0.max_item_mass))
     }
 
     fn add_parent(&mut self, parent: PySpectrum) {
