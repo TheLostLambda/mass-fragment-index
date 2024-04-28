@@ -3,6 +3,8 @@ use std::{fs, io, mem};
 
 use csv;
 use rand::Rng;
+
+// #[cfg(feature = "parallelism")]
 use rayon::prelude::*;
 
 use mass_fragment_index::fragment::{Fragment, FragmentName};
@@ -78,7 +80,19 @@ fn test_exact(
 ) -> bool {
     let precursor_error_tolerance = Tolerance::PPM(precursor_error_tolerance);
     let product_error_tolerance = Tolerance::PPM(product_error_tolerance);
-    entries.par_iter().for_each(|(pept, frags)|{
+
+    let it = {
+        // #[cfg(feature = "parallelism")]
+        {
+            entries.par_iter()
+        }
+        // #[cfg(not(feature = "parallelism"))]
+        // {
+        //     entries.iter()
+        // }
+    };
+
+    it.for_each(|(pept, frags)|{
         let parent_interval = search_index.parents_for(pept.mass, precursor_error_tolerance);
         for i in parent_interval {
             assert!(parent_interval.contains(i));
@@ -181,7 +195,17 @@ fn test_permuted(
 ) -> bool {
     let precursor_error_tolerance = Tolerance::PPM(precursor_error_tolerance);
     let product_error_tolerance = Tolerance::PPM(product_error_tolerance);
-    entries.par_iter().for_each(|(pept, frags)| {
+    let it = {
+        // #[cfg(feature = "parallelism")]
+        {
+            entries.par_iter()
+        }
+        // #[cfg(not(feature = "parallelism"))]
+        // {
+        //     entries.iter()
+        // }
+    };
+    it.for_each(|(pept, frags)| {
         let mut rng = rand::thread_rng();
         let mass_error_scale = ((precursor_error_tolerance) * (1.0)).bounds(pept.mass());
 

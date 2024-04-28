@@ -27,7 +27,7 @@ pub fn aboutzero(x: MassType) -> bool
 }
 
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum SortType {
     ByMass,
@@ -170,7 +170,7 @@ impl<T: IndexSortable> IndexBin<T> {
         self.sort_type = SortType::Unsorted;
     }
 
-    fn find_min_max_masses(&self) -> (MassType, MassType) {
+    pub fn find_min_max_masses(&self) -> (MassType, MassType) {
         let mut min_mass = MassType::INFINITY;
         let mut max_mass = 0.0 as MassType;
 
@@ -295,6 +295,30 @@ impl<T: IndexSortable + Default> Index<usize> for IndexBin<T> {
 }
 
 
+impl<T: IndexSortable> AsRef<[T]> for IndexBin<T> {
+    fn as_ref(&self) -> &[T] {
+        self.entries.as_slice()
+    }
+}
+
+impl<I: IndexSortable> FromIterator<I> for IndexBin<I> {
+    fn from_iter<T: IntoIterator<Item = I>>(iter: T) -> Self {
+        let entries = Vec::from_iter(iter);
+        let mut bin = Self::new(entries, SortType::Unsorted, 0.0, 0.0);
+        let (min, max) = bin.find_min_max_masses();
+        bin.min_mass = min;
+        bin.max_mass = max;
+        bin
+    }
+}
+
+
+impl<T: IndexSortable + PartialEq> PartialEq for IndexBin<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.entries == other.entries && self.sort_type == other.sort_type && self.min_mass == other.min_mass && self.max_mass == other.max_mass
+    }
+}
+
 
 #[cfg(test)]
 mod test {
@@ -304,10 +328,10 @@ mod test {
     #[test]
     fn test_build() {
         let spectra = vec![
-            Spectrum::new(2300.0, 2, 0, 0),
-            Spectrum::new(2301.0, 2, 0, 1),
-            Spectrum::new(2401.0, 2, 1, 0),
-            Spectrum::new(4100.0, 4, 0, 2),
+            Spectrum::new(2300.0, 2, 0, 0, 0),
+            Spectrum::new(2301.0, 2, 0, 1, 1),
+            Spectrum::new(2401.0, 2, 1, 0, 2),
+            Spectrum::new(4100.0, 4, 0, 2, 3),
         ];
         let mut parent_list = IndexBin::new(spectra, SortType::Unsorted, 0.0, 0.0);
         parent_list.sort(SortType::ByMass);

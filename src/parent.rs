@@ -69,6 +69,7 @@ pub struct Spectrum {
     pub precursor_charge: i32,
     pub source_file_id: ParentID,
     pub scan_number: ParentID,
+    pub sort_id: ParentID
 }
 
 impl Spectrum {
@@ -77,12 +78,14 @@ impl Spectrum {
         precursor_charge: i32,
         source_file_id: ParentID,
         scan_number: ParentID,
+        sort_id: ParentID
     ) -> Self {
         Self {
             precursor_mass,
             precursor_charge,
             source_file_id,
             scan_number,
+            sort_id
         }
     }
 }

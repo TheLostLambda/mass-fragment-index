@@ -1,16 +1,19 @@
 
+use std::sync::{Arc, RwLock};
+
 use pyo3::prelude::*;
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyValueError, PySystemError};
 use pyo3::pyclass::CompareOp;
 use pyo3::types::{PyFloat, PyType, PyBytes};
 
 use mass_fragment_index::fragment::{Fragment, FragmentSeries};
-use mass_fragment_index::index::{SearchIndex};
+use mass_fragment_index::index::SearchIndex;
 use mass_fragment_index::interval::Interval;
 use mass_fragment_index::parent::{Peptide, Spectrum};
 use mass_fragment_index::sort::{SortType, ParentID, MassType, Tolerance};
+use mass_fragment_index::peak::DeconvolutedPeak;
 
-use mass_fragment_index::peak::{DeconvolutedPeak};
+use mass_fragment_index::storage;
 
 use rmp_serde;
 
@@ -310,7 +313,8 @@ impl PySpectrum {
             scan_number,
             source_file_id,
             precursor_mass,
-            precursor_charge
+            precursor_charge,
+            sort_id: u32::MAX
         }.into()
     }
 
@@ -543,17 +547,17 @@ impl AsRef<SearchIndex<Fragment, Peptide>> for PyPeptideFragmentIndex {
 
 #[pyclass(name="PeakIndex", module="pyfragment_index")]
 #[derive(Debug)]
-pub struct PyPeakIndex(SearchIndex<DeconvolutedPeak, Spectrum>);
+pub struct PyPeakIndex(Arc<RwLock<SearchIndex<DeconvolutedPeak, Spectrum>>>);
 
 #[pymethods]
 impl PyPeakIndex {
     #[new]
     fn new(bins_per_dalton: u32, maxfragment_size: MassType) -> PyResult<Self> {
-        Ok(Self(SearchIndex::empty(bins_per_dalton, maxfragment_size)))
+        Ok(Self(Arc::new(RwLock::new(SearchIndex::empty(bins_per_dalton, maxfragment_size)))))
     }
 
     pub fn __getstate__<'py>(&self, py: Python<'py>) -> PyResult<&'py PyBytes> {
-        match rmp_serde::to_vec(&self.0) {
+        match rmp_serde::to_vec(&self.0.as_ref()) {
             Ok(payload) => {
                 match zstd::bulk::compress(&payload, 0) {
                     Ok(payload) => Ok(PyBytes::new(py, &payload)),
@@ -573,7 +577,7 @@ impl PyPeakIndex {
             Ok(decoder) => {
                 match rmp_serde::from_read(decoder) {
                     Ok(inst) => {
-                        self.0 = inst;
+                        self.0 = Arc::new(inst);
                         Ok(())
                     },
                     Err(err) => {
@@ -588,59 +592,128 @@ impl PyPeakIndex {
     }
 
     pub fn __getnewargs__(&self) -> PyResult<(u32, MassType)> {
-        Ok((self.0.bins_per_dalton, self.0.max_item_mass))
+        Ok((self.0.read().unwrap().bins_per_dalton, self.0.read().unwrap().max_item_mass))
     }
 
     fn add_parent(&mut self, parent: PySpectrum) {
-        self.0.add_parent(parent.into())
+        self.0.write().unwrap().add_parent(parent.into())
     }
 
     fn add(&mut self, peak: PyPeak) {
-        self.0.add(peak.into());
+        self.0.write().unwrap().add(peak.into());
     }
 
     fn parents_for(&self, mass: MassType, error_tolerance: MassType) -> PyInterval {
         let error_tolerance = Tolerance::PPM(error_tolerance);
-        self.0.parents_for(mass, error_tolerance).into()
+        self.0.read().unwrap().parents_for(mass, error_tolerance).into()
     }
 
     fn parents_for_range(&self, low: MassType, high: MassType, error_tolerance: MassType) -> PyInterval {
         let error_tolerance = Tolerance::PPM(error_tolerance);
-        self.0.parents_for_range(low, high, error_tolerance).into()
+        self.0.read().unwrap().parents_for_range(low, high, error_tolerance).into()
     }
 
     fn __repr__(&self) -> String {
         format!(
             "PeakIndex({} peaks, {} spectra, sorted={})",
-            self.0.bins.iter().map(|b| b.len()).sum::<usize>(),
-            self.0.parents.len(),
-            matches!(self.0.sort_type, SortType::ByParentId)
+            self.0.read().unwrap().bins.iter().map(|b| b.len()).sum::<usize>(),
+            self.0.read().unwrap().parents.len(),
+            matches!(self.0.read().unwrap().sort_type, SortType::ByParentId)
         )
         .to_string()
     }
 
     fn sort(&mut self) {
-        self.0.sort(SortType::ByParentId)
+        self.0.write().unwrap().sort(SortType::ByParentId)
     }
 
-    fn search(&self, query: MassType, error_tolerance: MassType, parentinterval: Option<PyInterval>) -> Vec<PyPeak> {
+    fn __iter__(&self) -> PeakIndexIter {
+        PeakIndexIter::new(self.0.clone())
+    }
+
+    fn search(&self, query: MassType, error_tolerance: MassType, parent_interval: Option<PyInterval>) -> PyResult<Vec<PyPeak>> {
         let error_tolerance = Tolerance::PPM(error_tolerance);
-        let parentinterval: Option<Interval> = match parentinterval {
+        let parent_interval: Option<Interval> = match parent_interval {
             Some(iv) => {
                 Some(iv.as_ref().clone())
             },
             None => None
         };
 
-        let searcher = self.0.search(query, error_tolerance, parentinterval);
-        searcher.into_iter().map(|f| f.into()).collect()
+        match self.0.read() {
+            Ok(obj) => {
+                let searcher = obj.search(query, error_tolerance, parent_interval);
+                Ok(searcher.into_iter().map(|f| f.into()).collect())
+            },
+            Err(err) => Err(PySystemError::new_err(format!("Lock contention: {}", err))),
+        }
     }
 }
 
-impl AsRef<SearchIndex<DeconvolutedPeak, Spectrum>> for PyPeakIndex {
-    fn as_ref(&self) -> &SearchIndex<DeconvolutedPeak, Spectrum> {
-        &self.0
+
+#[pyclass]
+pub struct PeakIndexIter {
+    search_index: Arc<RwLock<SearchIndex<DeconvolutedPeak, Spectrum>>>,
+    bin_index: usize,
+    position_in_bin: usize
+}
+
+impl PeakIndexIter {
+    fn new(search_index: Arc<RwLock<SearchIndex<DeconvolutedPeak, Spectrum>>>) -> Self {
+        PeakIndexIter {
+            search_index: search_index,
+            bin_index: 0,
+            position_in_bin: 0
+        }
     }
+}
+
+#[pymethods]
+impl PeakIndexIter {
+    fn __len__(&self) -> usize {
+        self.search_index.read().map(|index| {
+            index.bins.iter().map(|b| b.len()).sum::<usize>()
+        }).unwrap()
+    }
+
+    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    fn __next__(&mut self) -> Option<PyPeak> {
+        let val = self.search_index.read().map(|index| {
+            if self.bin_index >= index.bins.len() {
+                None
+            } else {
+                let bin = &index.bins[self.bin_index];
+                if self.position_in_bin < bin.len() {
+                    let value = Some(bin[self.position_in_bin].into());
+                    self.position_in_bin += 1;
+                    value
+                } else {
+                    self.position_in_bin = 0;
+                    while self.bin_index < index.bins.len() {
+                        self.bin_index += 1;
+                        let bin = &index.bins[self.bin_index];
+                        if bin.len() > 0 {
+                            let value = Some(bin[self.position_in_bin].into());
+                            self.position_in_bin += 1;
+                            return value
+                        }
+                    }
+                    return None
+                }
+            }
+        });
+        val.unwrap_or_default()
+    }
+}
+
+
+#[pyfunction]
+fn py_read_peak_index_pq(path: &str) -> PyResult<PyPeakIndex> {
+    let index = storage::read_peak_index(&path)?;
+    Ok(PyPeakIndex(Arc::new(RwLock::new(index))))
 }
 
 /// A Python module implemented in Rust.
@@ -655,5 +728,7 @@ fn pyfragment_index(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<PyPeak>()?;
     m.add_class::<PySpectrum>()?;
     m.add_class::<PyPeakIndex>()?;
+
+    m.add_function(wrap_pyfunction!(py_read_peak_index_pq, m)?)?;
     Ok(())
 }

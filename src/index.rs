@@ -73,7 +73,7 @@ impl<T: IndexSortable + Default, P: IndexSortable + Default> SearchIndex<T, P> {
 
     pub fn bin_for_mass(&self, mass: MassType) -> usize {
         let i = (mass * self.bins_per_dalton as MassType).round() as usize;
-        let bin_index = if i > self.bins.len() {
+        let bin_index = if i >= self.bins.len() {
             self.bins.len() - 1
         } else {
             i
@@ -477,10 +477,10 @@ mod test {
     #[test]
     fn test_build() {
         let spectra = vec![
-            Spectrum::new(2300.0, 2, 0, 0),
-            Spectrum::new(2301.0, 2, 0, 1),
-            Spectrum::new(2401.0, 2, 1, 0),
-            Spectrum::new(4100.0, 4, 0, 2),
+            Spectrum::new(2300.0, 2, 0, 0, 0),
+            Spectrum::new(2301.0, 2, 0, 1, 1),
+            Spectrum::new(2401.0, 2, 1, 0, 2),
+            Spectrum::new(4100.0, 4, 0, 2, 3),
         ];
         let mut parent_list = IndexBin::new(spectra, SortType::Unsorted, 0.0, 0.0);
         parent_list.sort(SortType::ByMass);
