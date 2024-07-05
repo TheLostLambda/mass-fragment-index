@@ -23,6 +23,24 @@ pub enum FragmentSeries {
     Unknown
 }
 
+impl FragmentSeries {
+    pub const fn series_name(&self) -> &'static str {
+        match self {
+            FragmentSeries::b => "b",
+            FragmentSeries::y => "y",
+            FragmentSeries::c => "c",
+            FragmentSeries::z => "z",
+            FragmentSeries::a => "a",
+            FragmentSeries::x => "x",
+            FragmentSeries::Precursor => "Precursor",
+            FragmentSeries::PeptideY => "PeptideY",
+            FragmentSeries::Oxonium => "Oxonium",
+            FragmentSeries::Internal => "Internal",
+            FragmentSeries::Unknown => "Unknown",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FragmentSeriesParsingError {
     Empty,
@@ -45,6 +63,33 @@ impl Error for FragmentSeriesParsingError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FragmentName(pub FragmentSeries, pub u16);
+
+impl FromStr for FragmentSeries {
+    type Err = FragmentSeriesParsingError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.len() == 0 {
+            return Err(FragmentSeriesParsingError::Empty)
+        }
+        let series = match s {
+            "b" => FragmentSeries::b,
+            "y" => FragmentSeries::y,
+            "c" => FragmentSeries::c,
+            "z" => FragmentSeries::z,
+            "a" => FragmentSeries::a,
+            "x" => FragmentSeries::x,
+            "Precursor" => FragmentSeries::Precursor,
+            "PeptideY" => FragmentSeries::PeptideY,
+            "Oxonium" => FragmentSeries::Oxonium,
+            "Internal" => FragmentSeries::Internal,
+            "Unknown" => FragmentSeries::Unknown,
+            _ => {
+                return Err(FragmentSeriesParsingError::UnknownSeries(s[0..1].to_string()))
+            }
+        };
+        Ok(series)
+    }
+}
 
 impl FromStr for FragmentName {
     type Err = FragmentSeriesParsingError;
