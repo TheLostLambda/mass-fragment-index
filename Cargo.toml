@@ -31,6 +31,6 @@ binary_storage = ["arrow", "parquet"]
 
 [dependencies]
 serde = { version = "1.0.203", optional = true , features = ["derive"]}
-arrow = { version = "50.0.0", optional = true}
-parquet ={ version = "50.0.0", features = ["zstd", "arrow"], optional = true}
+arrow = { version = "52.2.0", optional = true}
+parquet ={ version = "52.2.0", features = ["zstd", "arrow"], optional = true}
 itertools = "0.13.0"
