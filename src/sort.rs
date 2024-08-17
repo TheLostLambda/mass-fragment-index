@@ -1,31 +1,29 @@
-
-use std::{ops::{Index, Mul}, str::FromStr, error::Error, fmt::Display};
+use std::{
+    error::Error,
+    fmt::Display,
+    ops::{Index, Mul},
+    str::FromStr,
+};
 
 #[cfg(feature = "serde")]
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 use crate::interval::Interval;
-
 
 pub type ParentID = u32;
 pub type MassType = f32;
 
-
-pub fn _isclose(x: MassType, y: MassType, rtol: MassType, atol: MassType) -> bool
-{
+pub fn _isclose(x: MassType, y: MassType, rtol: MassType, atol: MassType) -> bool {
     (x - y).abs() <= (atol + rtol * y.abs())
 }
 
-pub fn isclose(x: MassType, y: MassType) -> bool
-{
+pub fn isclose(x: MassType, y: MassType) -> bool {
     _isclose(x, y, 1e-5, 1e-8)
 }
 
-pub fn aboutzero(x: MassType) -> bool
-{
+pub fn aboutzero(x: MassType) -> bool {
     isclose(x, 0.0)
 }
-
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -35,25 +33,23 @@ pub enum SortType {
     Unsorted,
 }
 
-
 impl Default for SortType {
     fn default() -> Self {
         Self::Unsorted
     }
 }
 
-
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Tolerance {
     PPM(MassType),
-    Da(MassType)
+    Da(MassType),
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ToleranceParsingError {
     UnknownUnit,
-    InvalidMagnitude
+    InvalidMagnitude,
 }
 
 impl Display for ToleranceParsingError {
@@ -70,17 +66,17 @@ impl FromStr for Tolerance {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let n = s.len();
         if n <= 2 {
-            return Err(ToleranceParsingError::InvalidMagnitude)
+            return Err(ToleranceParsingError::InvalidMagnitude);
         }
         let s = s.to_lowercase();
         if s.ends_with("da") {
-            if let Ok(magnitude) = s[0..n-2].parse::<MassType>() {
+            if let Ok(magnitude) = s[0..n - 2].parse::<MassType>() {
                 Ok(Self::Da(magnitude))
             } else {
                 Err(ToleranceParsingError::InvalidMagnitude)
             }
         } else if s.ends_with("ppm") {
-            if let Ok(magnitude) = s[0..n-3].parse::<MassType>() {
+            if let Ok(magnitude) = s[0..n - 3].parse::<MassType>() {
                 Ok(Self::PPM(magnitude))
             } else {
                 Err(ToleranceParsingError::InvalidMagnitude)
@@ -98,9 +94,7 @@ impl Tolerance {
                 let width = query * *tol / 1e6;
                 (query - width, query + width)
             }
-            Tolerance::Da(tol) => {
-                (query - *tol, query + *tol)
-            }
+            Tolerance::Da(tol) => (query - *tol, query + *tol),
         }
     }
 
@@ -114,7 +108,7 @@ impl Tolerance {
             Self::PPM(_tol) => {
                 let magnitude = (query - reference) / reference * 1e6;
                 format!("{}PPM", magnitude).to_string()
-            },
+            }
             Self::Da(_tol) => {
                 let magnitude = query - reference;
                 format!("{}Da", magnitude).to_string()
@@ -129,7 +123,7 @@ impl Mul<MassType> for Tolerance {
     fn mul(self, rhs: MassType) -> Self::Output {
         match self {
             Self::Da(val) => Self::Da(rhs * val),
-            Self::PPM(val) => Self::PPM(rhs * val)
+            Self::PPM(val) => Self::PPM(rhs * val),
         }
     }
 }
@@ -139,15 +133,13 @@ pub trait IndexSortable {
     fn parent_id(&self) -> ParentID;
 }
 
-
-
 #[derive(Debug, Clone, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct IndexBin<T: IndexSortable> {
-    pub entries: Vec<T>,
-    pub sort_type: SortType,
-    pub min_mass: MassType,
-    pub max_mass: MassType,
+    pub(crate) entries: Vec<T>,
+    pub(crate) sort_type: SortType,
+    pub(crate) min_mass: MassType,
+    pub(crate) max_mass: MassType,
 }
 
 impl<T: IndexSortable> IndexBin<T> {
@@ -165,7 +157,7 @@ impl<T: IndexSortable> IndexBin<T> {
         }
     }
 
-    pub fn append(&mut self, entry: T) {
+    pub fn push(&mut self, entry: T) {
         self.entries.push(entry);
         self.sort_type = SortType::Unsorted;
     }
@@ -182,28 +174,26 @@ impl<T: IndexSortable> IndexBin<T> {
                 max_mass = f.mass();
             }
         }
-        return (min_mass, max_mass)
+        return (min_mass, max_mass);
     }
 
     pub fn sort(&mut self, ordering: SortType) {
         match ordering {
             SortType::ByMass => {
-                self.entries.sort_by(|a,b| {
-                    a.mass().partial_cmp(&b.mass()).unwrap()
-                });
+                self.entries
+                    .sort_by(|a, b| a.mass().partial_cmp(&b.mass()).unwrap());
                 if let Some(f) = self.entries.first() {
                     self.min_mass = f.mass()
                 }
                 if let Some(f) = self.entries.last() {
                     self.max_mass = f.mass()
                 }
-            },
+            }
             SortType::ByParentId => {
-                self.entries.sort_by(|a,b| {
-                    a.parent_id().cmp(&b.parent_id())
-                });
+                self.entries
+                    .sort_by(|a, b| a.parent_id().cmp(&b.parent_id()));
                 (self.min_mass, self.max_mass) = self.find_min_max_masses();
-            },
+            }
             SortType::Unsorted => {
                 (self.min_mass, self.max_mass) = self.find_min_max_masses();
             }
@@ -212,22 +202,43 @@ impl<T: IndexSortable> IndexBin<T> {
     }
 
     pub fn len(&self) -> usize {
-        return self.entries.len()
+        return self.entries.len();
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
     }
 
     pub fn iter(&self) -> std::slice::Iter<T> {
         self.entries.iter()
     }
 
-    pub fn iter_mut(&mut self) -> std::slice::IterMut<T> {
+    #[allow(unused)]
+    pub(crate) fn iter_mut(&mut self) -> std::slice::IterMut<T> {
         self.entries.iter_mut()
+    }
+
+    pub fn as_slice(&self) -> &[T] {
+        &self.entries
+    }
+
+    pub fn first(&self) -> Option<&T> {
+        self.entries.first()
+    }
+
+    pub fn last(&self) -> Option<&T> {
+        self.entries.last()
     }
 
     pub fn search_mass(&self, query: MassType, error_tolerance: Tolerance) -> Interval {
         let (lower_bound, upper_bound) = error_tolerance.bounds(query);
 
-        let mut lower_i = self.entries.partition_point(|entry| entry.mass() <= lower_bound);
-        let mut upper_i = self.entries[lower_i..self.len()].partition_point(|entry| entry.mass() <= upper_bound) + lower_i;
+        let mut lower_i = self
+            .entries
+            .partition_point(|entry| entry.mass() <= lower_bound);
+        let mut upper_i = self.entries[lower_i..self.len()]
+            .partition_point(|entry| entry.mass() <= upper_bound)
+            + lower_i;
 
         while lower_i > 0 {
             if error_tolerance.test(query, self.entries[lower_i - 1].mass()) {
@@ -253,8 +264,8 @@ impl<T: IndexSortable> IndexBin<T> {
 
         let start = parent_id_range.start as ParentID;
         let mut index = match self.entries.binary_search_by(|e| e.parent_id().cmp(&start)) {
-            Ok(found) =>  found ,
-            Err(location) => location
+            Ok(found) => found,
+            Err(location) => location,
         };
 
         while index >= 1 && index < self.len() {
@@ -266,10 +277,14 @@ impl<T: IndexSortable> IndexBin<T> {
         }
         result.start = index;
 
-        let end = if parent_id_range.end > 0 { parent_id_range.end - 1 } else { 0 } as ParentID;
+        let end = if parent_id_range.end > 0 {
+            parent_id_range.end - 1
+        } else {
+            0
+        } as ParentID;
         index = match self.entries.binary_search_by(|e| e.parent_id().cmp(&end)) {
-            Ok(found) =>  found ,
-            Err(location) => location
+            Ok(found) => found,
+            Err(location) => location,
         };
 
         while index + 1 < self.len() {
@@ -283,21 +298,25 @@ impl<T: IndexSortable> IndexBin<T> {
 
         result
     }
-}
 
+    pub fn min_mass(&self) -> f32 {
+        self.min_mass
+    }
+
+    pub fn max_mass(&self) -> f32 {
+        self.max_mass
+    }
+
+    pub fn sort_type(&self) -> SortType {
+        self.sort_type
+    }
+}
 
 impl<T: IndexSortable + Default> Index<usize> for IndexBin<T> {
     type Output = T;
 
     fn index(&self, index: usize) -> &Self::Output {
         &self.entries[index]
-    }
-}
-
-
-impl<T: IndexSortable> AsRef<[T]> for IndexBin<T> {
-    fn as_ref(&self) -> &[T] {
-        self.entries.as_slice()
     }
 }
 
@@ -312,13 +331,14 @@ impl<I: IndexSortable> FromIterator<I> for IndexBin<I> {
     }
 }
 
-
 impl<T: IndexSortable + PartialEq> PartialEq for IndexBin<T> {
     fn eq(&self, other: &Self) -> bool {
-        self.entries == other.entries && self.sort_type == other.sort_type && self.min_mass == other.min_mass && self.max_mass == other.max_mass
+        self.entries == other.entries
+            && self.sort_type == other.sort_type
+            && self.min_mass == other.min_mass
+            && self.max_mass == other.max_mass
     }
 }
-
 
 #[cfg(test)]
 mod test {

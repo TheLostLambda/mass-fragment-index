@@ -152,6 +152,7 @@ pub fn fragment_to_arrow(
 pub fn write_fragment_index<P: AsRef<Path>>(
     index: &SearchIndex<Fragment, Peptide>,
     directory: &P,
+    compression_level: Option<Compression>
 ) -> io::Result<()> {
     let peptides_path = directory.as_ref().join("peptides.parquet");
     let fragments_path = directory.as_ref().join("fragments.parquet");
@@ -159,15 +160,16 @@ pub fn write_fragment_index<P: AsRef<Path>>(
 
     let peptides_fh = fs::File::create(peptides_path)?;
     let peptides_schema = make_peptide_schema();
-    let compression = Compression::ZSTD(ZstdLevel::try_new(20).unwrap());
+    let compression = compression_level.unwrap_or(Compression::ZSTD(ZstdLevel::try_new(20).unwrap()));
 
     {
         let props = WriterProperties::builder()
             .set_compression(compression.clone())
+            .set_column_encoding("mass".into(), parquet::basic::Encoding::BYTE_STREAM_SPLIT)
             .build();
         let mut writer =
             ArrowWriter::try_new(peptides_fh, peptides_schema.clone(), Some(props.clone()))?;
-        let batch = peptide_to_arrow(index.parents.as_ref(), peptides_schema.clone()).unwrap();
+        let batch = peptide_to_arrow(index.parents.as_slice(), peptides_schema.clone()).unwrap();
         writer.write(&batch)?;
         writer.close()?;
     }
@@ -178,13 +180,14 @@ pub fn write_fragment_index<P: AsRef<Path>>(
     {
         let props = WriterProperties::builder()
             .set_compression(compression.clone())
+            .set_column_encoding("mass".into(), parquet::basic::Encoding::BYTE_STREAM_SPLIT)
             .set_column_encoding("segment_id".into(), parquet::basic::Encoding::RLE)
             .build();
         let mut writer =
             ArrowWriter::try_new(fragments_fh, fragments_schema.clone(), Some(props.clone()))?;
         for (i, bin) in index.bins.iter().enumerate() {
             let batch =
-                fragment_to_arrow(bin.as_ref(), fragments_schema.clone(), i as u64).unwrap();
+                fragment_to_arrow(bin.as_slice(), fragments_schema.clone(), i as u64).unwrap();
             writer.write(&batch)?;
         }
         writer.close()?;

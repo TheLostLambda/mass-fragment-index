@@ -78,7 +78,7 @@ fn test_index_build_traversal() -> io::Result<()> {
     let search_index = build_index(reader)?;
 
     let tmpdir = tempfile::tempdir()?;
-    write_fragment_index(&search_index, &tmpdir.path())?;
+    write_fragment_index(&search_index, &tmpdir.path(), None)?;
 
     let duplicate_index = read_fragment_index(&tmpdir.path())?;
     assert_eq!(duplicate_index.parents.len(), search_index.parents.len());

@@ -475,7 +475,7 @@ impl PyPeptideFragmentIndex {
             "PyPeptideFragmentIndex({} fragments, {} peptides, sorted={})",
             self.0.bins.iter().map(|b| b.len()).sum::<usize>(),
             self.0.parents.len(),
-            matches!(self.0.sort_type, SortType::ByParentId)
+            matches!(self.0.sort_type(), SortType::ByParentId)
         )
         .to_string()
     }
@@ -494,7 +494,7 @@ impl PyPeptideFragmentIndex {
         };
 
         let searcher = self.0.search(query, error_tolerance, parentinterval);
-        searcher.into_iter().map(|f| f.into()).collect()
+        searcher.into_iter().map(|f| f.clone().into()).collect()
     }
 
     pub fn __getstate__<'py>(&self, py: Python<'py>) -> PyResult<&'py PyBytes> {
@@ -533,7 +533,7 @@ impl PyPeptideFragmentIndex {
     }
 
     pub fn __getnewargs__(&self) -> PyResult<(u32, MassType)> {
-        Ok((self.0.bins_per_dalton, self.0.max_item_mass))
+        Ok((self.0.bins_per_dalton(), self.0.max_item_mass()))
     }
 
 }
@@ -592,7 +592,7 @@ impl PyPeakIndex {
     }
 
     pub fn __getnewargs__(&self) -> PyResult<(u32, MassType)> {
-        Ok((self.0.read().unwrap().bins_per_dalton, self.0.read().unwrap().max_item_mass))
+        Ok((self.0.read().unwrap().bins_per_dalton(), self.0.read().unwrap().max_item_mass()))
     }
 
     fn add_parent(&mut self, parent: PySpectrum) {
@@ -618,7 +618,7 @@ impl PyPeakIndex {
             "PeakIndex({} peaks, {} spectra, sorted={})",
             self.0.read().unwrap().bins.iter().map(|b| b.len()).sum::<usize>(),
             self.0.read().unwrap().parents.len(),
-            matches!(self.0.read().unwrap().sort_type, SortType::ByParentId)
+            matches!(self.0.read().unwrap().sort_type(), SortType::ByParentId)
         )
         .to_string()
     }
@@ -643,7 +643,7 @@ impl PyPeakIndex {
         match self.0.read() {
             Ok(obj) => {
                 let searcher = obj.search(query, error_tolerance, parent_interval);
-                Ok(searcher.into_iter().map(|f| f.into()).collect())
+                Ok(searcher.into_iter().map(|f| f.clone().into()).collect())
             },
             Err(err) => Err(PySystemError::new_err(format!("Lock contention: {}", err))),
         }

@@ -17,6 +17,7 @@ use itertools::izip;
 
 use parquet::arrow::arrow_reader::ArrowReaderBuilder;
 use parquet::basic::Compression;
+use parquet::basic::Encoding;
 use parquet::basic::ZstdLevel;
 use parquet::{arrow::ArrowWriter, file::properties::*};
 
@@ -140,6 +141,7 @@ pub fn peaks_to_arrow(
 pub fn write_peak_index<P: AsRef<Path>>(
     index: &SearchIndex<DeconvolutedPeak, Spectrum>,
     directory: &P,
+    compression_level: Option<Compression>,
 ) -> io::Result<()> {
     let spectra_path = directory.as_ref().join("spectra.parquet");
     let peaks_path = directory.as_ref().join("peaks.parquet");
@@ -147,15 +149,17 @@ pub fn write_peak_index<P: AsRef<Path>>(
 
     let spectra_fh = fs::File::create(spectra_path)?;
     let spectra_schema = make_spectrum_schema();
-    let compression = Compression::ZSTD(ZstdLevel::try_new(20).unwrap());
+    let compression =
+        compression_level.unwrap_or(Compression::ZSTD(ZstdLevel::try_new(20).unwrap()));
 
     {
         let props = WriterProperties::builder()
             .set_compression(compression.clone())
+            .set_column_encoding("precursor_mass".into(), Encoding::BYTE_STREAM_SPLIT)
             .build();
         let mut writer =
             ArrowWriter::try_new(spectra_fh, spectra_schema.clone(), Some(props.clone()))?;
-        let batch = spectra_to_arrow(index.parents.as_ref(), spectra_schema.clone()).unwrap();
+        let batch = spectra_to_arrow(index.parents.as_slice(), spectra_schema.clone()).unwrap();
         writer.write(&batch)?;
         writer.close()?;
     }
@@ -167,34 +171,32 @@ pub fn write_peak_index<P: AsRef<Path>>(
         let props = WriterProperties::builder()
             .set_compression(compression.clone())
             .set_column_encoding("segment_id".into(), parquet::basic::Encoding::RLE)
+            .set_column_encoding("mass".into(), parquet::basic::Encoding::BYTE_STREAM_SPLIT)
             .build();
         let mut writer = ArrowWriter::try_new(peaks_fh, peaks_schema.clone(), Some(props.clone()))?;
         for (i, bin) in index.bins.iter().enumerate() {
-            let batch = peaks_to_arrow(bin.as_ref(), peaks_schema.clone(), i as u64).unwrap();
+            let batch = peaks_to_arrow(bin.as_slice(), peaks_schema.clone(), i as u64).unwrap();
             writer.write(&batch)?;
         }
         writer.close()?;
     }
 
-
     let meta_schema = make_meta_schema();
     {
         let meta_fh = io::BufWriter::new(fs::File::create(meta_path)?);
+        let mut writer = JSONArrayLineWriter::new(meta_fh);
         let bins_per_dalton = UInt32Array::from(vec![index.bins_per_dalton]);
         let max_item_mass = Float32Array::from(vec![index.max_item_mass]);
-        let mut writer = JSONArrayLineWriter::new(meta_fh);
 
         writer
-            .write_batches(
-                &vec![&RecordBatch::try_new(
-                    meta_schema.clone(),
-                    vec![
-                        Arc::new(bins_per_dalton) as ArrayRef,
-                        Arc::new(max_item_mass) as ArrayRef,
-                    ],
-                )
-                .unwrap(),
-            ])
+            .write_batches(&vec![&RecordBatch::try_new(
+                meta_schema.clone(),
+                vec![
+                    Arc::new(bins_per_dalton) as ArrayRef,
+                    Arc::new(max_item_mass) as ArrayRef,
+                ],
+            )
+            .unwrap()])
             .unwrap();
         writer.finish().unwrap();
     }
@@ -280,26 +282,43 @@ pub fn read_peak_index<P: AsRef<Path>>(
     let mut bin_collector: HashMap<u64, Vec<DeconvolutedPeak>> = HashMap::default();
     let peaks_fh = fs::File::open(peaks_path)?;
     let reader = ArrowReaderBuilder::try_new(peaks_fh)?.build()?;
-    reader.enumerate()
-        .for_each(|(_, b)| {
-            let b = b.unwrap();
-            let mass = field_of!(b, "mass").as_any().downcast_ref::<Float32Array>().unwrap();
-            let intensity = field_of!(b, "intensity").as_any().downcast_ref::<Float32Array>().unwrap();
-            let charge = field_of!(b, "charge").as_any().downcast_ref::<Int16Array>().unwrap();
-            let scan_ref = field_of!(b, "scan_ref").as_any().downcast_ref::<UInt32Array>().unwrap();
-            let segment_id = field_of!(b, "segment_id").as_any().downcast_ref::<UInt64Array>().unwrap();
-            izip!(mass, charge, intensity, scan_ref, segment_id)
-                .for_each(|(mass, charge, intensity, scan_ref, segment_id)| {
-                    let peak = DeconvolutedPeak::new(
-                        mass.unwrap(),
-                        charge.unwrap() as i16,
-                        intensity.unwrap(),
-                        scan_ref.unwrap(),
-                    );
-                    bin_collector.entry(segment_id.unwrap()).or_default().push(peak);
-                })
-        });
-
+    reader.enumerate().for_each(|(_, b)| {
+        let b = b.unwrap();
+        let mass = field_of!(b, "mass")
+            .as_any()
+            .downcast_ref::<Float32Array>()
+            .unwrap();
+        let intensity = field_of!(b, "intensity")
+            .as_any()
+            .downcast_ref::<Float32Array>()
+            .unwrap();
+        let charge = field_of!(b, "charge")
+            .as_any()
+            .downcast_ref::<Int16Array>()
+            .unwrap();
+        let scan_ref = field_of!(b, "scan_ref")
+            .as_any()
+            .downcast_ref::<UInt32Array>()
+            .unwrap();
+        let segment_id = field_of!(b, "segment_id")
+            .as_any()
+            .downcast_ref::<UInt64Array>()
+            .unwrap();
+        izip!(mass, charge, intensity, scan_ref, segment_id).for_each(
+            |(mass, charge, intensity, scan_ref, segment_id)| {
+                let peak = DeconvolutedPeak::new(
+                    mass.unwrap(),
+                    charge.unwrap() as i16,
+                    intensity.unwrap(),
+                    scan_ref.unwrap(),
+                );
+                bin_collector
+                    .entry(segment_id.unwrap())
+                    .or_default()
+                    .push(peak);
+            },
+        )
+    });
 
     let mut index = SearchIndex::empty(bins_per_dalton, max_item_mass);
     index.parents = spectra;

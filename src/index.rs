@@ -1,6 +1,9 @@
 #[cfg(feature = "serde")]
 use serde::{Serialize, Deserialize};
 
+#[cfg(feature = "parallelism")]
+use rayon::prelude::*;
+
 use crate::interval::Interval;
 use crate::sort::{IndexBin, IndexSortable, MassType, SortType, Tolerance};
 
@@ -9,9 +12,9 @@ use crate::sort::{IndexBin, IndexSortable, MassType, SortType, Tolerance};
 pub struct SearchIndex<T: IndexSortable + Default, P: IndexSortable + Default> {
     pub bins: Vec<IndexBin<T>>,
     pub parents: IndexBin<P>,
-    pub bins_per_dalton: u32,
-    pub max_item_mass: MassType,
-    pub sort_type: SortType,
+    pub(crate) bins_per_dalton: u32,
+    pub(crate) max_item_mass: MassType,
+    pub(crate) sort_type: SortType,
 }
 
 impl<T: IndexSortable + Default, P: IndexSortable + Default> SearchIndex<T, P> {
@@ -35,6 +38,18 @@ impl<T: IndexSortable + Default, P: IndexSortable + Default> SearchIndex<T, P> {
         }
         let bin: IndexBin<T> = IndexBin::default();
         self.bins.push(bin);
+    }
+
+    pub fn num_bins(&self) -> usize {
+        self.bins.len()
+    }
+
+    pub fn num_entries(&self) -> usize {
+        self.bins.iter().map(|b| b.len()).sum()
+    }
+
+    pub fn iter_bins(&self) -> std::slice::Iter<'_, IndexBin<T>> {
+        self.bins.iter()
     }
 
     pub fn describe_bins(&self) {
@@ -88,14 +103,20 @@ impl<T: IndexSortable + Default, P: IndexSortable + Default> SearchIndex<T, P> {
         self.sort_type = ordering
     }
 
+    #[cfg(feature = "parallelism")]
+    pub fn par_sort(&mut self, ordering: SortType) where T: Send {
+        self.bins.par_iter_mut().for_each(|bin| bin.sort(ordering));
+        self.sort_type = ordering;
+    }
+
     pub fn add_parent(&mut self, parent_molecule: P) {
-        self.parents.append(parent_molecule)
+        self.parents.push(parent_molecule)
     }
 
     pub fn add(&mut self, entry: T) -> usize {
         let mass = entry.mass();
         let bin_index = self.bin_for_mass(mass);
-        self.bins[bin_index].append(entry);
+        self.bins[bin_index].push(entry);
         bin_index
     }
 
@@ -154,6 +175,18 @@ impl<T: IndexSortable + Default, P: IndexSortable + Default> SearchIndex<T, P> {
             0,
             parent_interval_used,
         )
+    }
+
+    pub fn bins_per_dalton(&self) -> u32 {
+        self.bins_per_dalton
+    }
+
+    pub fn max_item_mass(&self) -> f32 {
+        self.max_item_mass
+    }
+
+    pub fn sort_type(&self) -> SortType {
+        self.sort_type
     }
 }
 
@@ -372,7 +405,7 @@ impl<'a, T: IndexSortable + Default, P: IndexSortable + Default> SearchIndexSear
         hit
     }
 
-    fn next_entry(&mut self) -> Option<&T> {
+    fn next_entry(&mut self) -> Option<&'a T> {
         let mut entry = None;
         let mut hit = false;
         if self.bin_position < self.bin_position_range.end {
@@ -454,14 +487,14 @@ impl<'a, T: IndexSortable + Default, P: IndexSortable + Default> SearchIndexSear
     }
 }
 
-impl<'a, T: IndexSortable + Default + Clone, P: IndexSortable + Default> Iterator
+impl<'a, T: IndexSortable + Default, P: IndexSortable + Default> Iterator
     for SearchIndexSearcher<'a, T, P>
 {
-    type Item = T;
+    type Item = &'a T;
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(entry) = self.next_entry() {
-            Some(entry.clone())
+            Some(entry)
         } else {
             None
         }

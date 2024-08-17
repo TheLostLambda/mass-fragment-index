@@ -1,10 +1,13 @@
-use std::{env, io};
+use std::{env, io, path::PathBuf};
 
 use mzdata::{io::DetailLevel, prelude::*, MzMLReader};
 
 use mass_fragment_index::{
-    sort::SortType, storage::{read_peak_index, write_peak_index}, DeconvolutedPeak, DeconvolutedSpectrumIndex, Spectrum
+    sort::SortType,
+    storage::{read_peak_index, write_peak_index},
+    DeconvolutedPeak, DeconvolutedSpectrumIndex, Spectrum,
 };
+use parquet::basic::ZstdLevel;
 
 fn main() -> io::Result<()> {
     let mut args = env::args().skip(1);
@@ -13,9 +16,13 @@ fn main() -> io::Result<()> {
         .next()
         .unwrap_or_else(|| panic!("Please provide a path to an mzML file"));
 
-    let storage_dir = args
+    let storage_dir: PathBuf = args
         .next()
-        .unwrap_or_else(|| panic!("Please provide a path to write index to"));
+        .unwrap_or_else(|| panic!("Please provide a path to write index to")).into();
+
+    if !storage_dir.exists() {
+        std::fs::DirBuilder::new().recursive(true).create(&storage_dir)?;
+    }
 
     let mut reader = MzMLReader::open_path(mzml_path)?;
     reader.detail_level = DetailLevel::MetadataOnly;
@@ -75,7 +82,13 @@ fn main() -> io::Result<()> {
     index.sort(SortType::ByParentId);
 
     eprintln!("Writing index");
-    write_peak_index(&index, &storage_dir)?;
+    write_peak_index(
+        &index,
+        &storage_dir,
+        Some(parquet::basic::Compression::ZSTD(
+            ZstdLevel::try_new(20).unwrap(),
+        )),
+    )?;
 
     let iv = index.parents_for_range(1200.0, 2300.0, mass_fragment_index::Tolerance::Da(0.2));
 
@@ -84,12 +97,20 @@ fn main() -> io::Result<()> {
     let searched_peaks: Vec<_> = it.collect();
     eprintln!("Found peaks: {}", searched_peaks.len());
 
-    eprintln!("Loading index from disk: {}", storage_dir);
+    eprintln!("Loading index from disk: {}", storage_dir.display());
     let duplicate = read_peak_index(&storage_dir)?;
-    assert_eq!(duplicate.parents.entries, index.parents.entries);
+    for (p1, p2) in index.parents.iter().zip(duplicate.parents.iter()) {
+        assert_eq!(p1, p2);
+    }
 
     for (i, (abin, bbin)) in index.bins.iter().zip(duplicate.bins.iter()).enumerate() {
-        assert_eq!(abin.len(), bbin.len(), "Bin {i} not equal: {} != {}", abin.len(), bbin.len());
+        assert_eq!(
+            abin.len(),
+            bbin.len(),
+            "Bin {i} not equal: {} != {}",
+            abin.len(),
+            bbin.len()
+        );
     }
 
     let iv = duplicate.parents_for_range(1200.0, 2300.0, mass_fragment_index::Tolerance::Da(0.2));

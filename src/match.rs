@@ -58,14 +58,14 @@ impl HyperscoreMatcher {
 impl IndexMatcher {
     pub fn new(tolerance: Tolerance) -> Self { Self { tolerance } }
 
-    pub fn search_index<T: IndexSortable + Default + Clone, P: IndexSortable + Default>(
+    pub fn search_index<'a, T: IndexSortable + Default + Clone, P: IndexSortable + Default>(
         &self, queries: &[MassType],
         parent_range: (MassType, MassType),
-        index: &SearchIndex<T, P>) -> HashMap<ParentID, Vec<T>> {
+        index: &'a SearchIndex<T, P>) -> HashMap<ParentID, Vec<&'a T>> {
 
         let parent_interval = index.parents_for_range(parent_range.0, parent_range.1, self.tolerance);
 
-        let mut matches: HashMap<ParentID, Vec<T>> = HashMap::new();
+        let mut matches: HashMap<ParentID, Vec<&T>> = HashMap::new();
 
         for query in queries {
             for hit in index.search(*query, self.tolerance, Some(parent_interval)) {
@@ -92,11 +92,11 @@ impl IndexMatcher {
             for hit in index.search(*mass, self.tolerance, Some(parent_interval)) {
                 match matches.entry(hit.parent_id()) {
                     Entry::Occupied(mut entry) => {
-                        entry.get_mut().add(hit, *intensity);
+                        entry.get_mut().add(*hit, *intensity);
                     },
                     Entry::Vacant(entry) => {
                         let mut state = HyperscoreMatcher::default();
-                        state.add(hit, *intensity);
+                        state.add(*hit, *intensity);
                         entry.insert(state);
                     },
                 }
