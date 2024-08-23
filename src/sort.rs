@@ -201,6 +201,11 @@ impl<T: IndexSortable> IndexBin<T> {
         self.sort_type = ordering;
     }
 
+    pub fn assume_sorted(&mut self, sort_type: SortType) {
+        (self.min_mass, self.max_mass) = self.find_min_max_masses();
+        self.sort_type = sort_type;
+    }
+
     pub fn len(&self) -> usize {
         return self.entries.len();
     }
@@ -323,10 +328,7 @@ impl<T: IndexSortable + Default> Index<usize> for IndexBin<T> {
 impl<I: IndexSortable> FromIterator<I> for IndexBin<I> {
     fn from_iter<T: IntoIterator<Item = I>>(iter: T) -> Self {
         let entries = Vec::from_iter(iter);
-        let mut bin = Self::new(entries, SortType::Unsorted, 0.0, 0.0);
-        let (min, max) = bin.find_min_max_masses();
-        bin.min_mass = min;
-        bin.max_mass = max;
+        let bin = entries.into();
         bin
     }
 }
@@ -337,6 +339,16 @@ impl<T: IndexSortable + PartialEq> PartialEq for IndexBin<T> {
             && self.sort_type == other.sort_type
             && self.min_mass == other.min_mass
             && self.max_mass == other.max_mass
+    }
+}
+
+impl<T: IndexSortable> From<Vec<T>> for IndexBin<T> {
+    fn from(value: Vec<T>) -> Self {
+        let mut this = Self::new(value, SortType::Unsorted, 0.0, 0.0);
+        let (min, max) = this.find_min_max_masses();
+        this.min_mass = min;
+        this.max_mass = max;
+        this
     }
 }
 

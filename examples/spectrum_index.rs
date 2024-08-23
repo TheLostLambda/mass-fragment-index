@@ -82,13 +82,8 @@ fn main() -> io::Result<()> {
     index.sort(SortType::ByParentId);
 
     eprintln!("Writing index");
-    write_peak_index(
-        &index,
-        &storage_dir,
-        Some(parquet::basic::Compression::ZSTD(
-            ZstdLevel::try_new(20).unwrap(),
-        )),
-    )?;
+
+    index.write_parquet(&storage_dir, None)?;
 
     let iv = index.parents_for_range(1200.0, 2300.0, mass_fragment_index::Tolerance::Da(0.2));
 
@@ -98,7 +93,9 @@ fn main() -> io::Result<()> {
     eprintln!("Found peaks: {}", searched_peaks.len());
 
     eprintln!("Loading index from disk: {}", storage_dir.display());
-    let duplicate = read_peak_index(&storage_dir)?;
+
+    let duplicate = DeconvolutedSpectrumIndex::read_parquet(&storage_dir)?;
+    eprintln!("Original index: {} precursors. Loaded index: {} precursors", index.parents.len(), duplicate.parents.len());
     for (p1, p2) in index.parents.iter().zip(duplicate.parents.iter()) {
         assert_eq!(p1, p2);
     }

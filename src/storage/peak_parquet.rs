@@ -26,6 +26,8 @@ use crate::sort::IndexBin;
 use crate::sort::SortType;
 use crate::{parent::Spectrum, peak::DeconvolutedPeak};
 
+use super::ArrowStorage;
+
 macro_rules! afield {
     ($name:expr, $ctype:expr) => {
         Arc::new(Field::new($name, $ctype, false))
@@ -136,6 +138,130 @@ pub fn peaks_to_arrow(
             as_array_ref!(segment_id_builder),
         ],
     )
+}
+
+impl ArrowStorage for DeconvolutedPeak {
+    fn schema() -> arrow::datatypes::SchemaRef {
+        make_peak_schema()
+    }
+
+    fn from_batch<'a>(
+        batch: &'a RecordBatch,
+        _schema: arrow::datatypes::SchemaRef,
+    ) -> impl Iterator<Item = (Self, u64)> + 'a {
+         let mass = field_of!(batch, "mass")
+            .as_any()
+            .downcast_ref::<Float32Array>()
+            .unwrap();
+        let intensity = field_of!(batch, "intensity")
+            .as_any()
+            .downcast_ref::<Float32Array>()
+            .unwrap();
+        let charge = field_of!(batch, "charge")
+            .as_any()
+            .downcast_ref::<Int16Array>()
+            .unwrap();
+        let scan_ref = field_of!(batch, "scan_ref")
+            .as_any()
+            .downcast_ref::<UInt32Array>()
+            .unwrap();
+        let segment_id = field_of!(batch, "segment_id")
+            .as_any()
+            .downcast_ref::<UInt64Array>()
+            .unwrap();
+        izip!(mass, charge, intensity, scan_ref, segment_id).map(
+            |(mass, charge, intensity, scan_ref, segment_id)| {
+                let peak = DeconvolutedPeak::new(
+                    mass.unwrap(),
+                    charge.unwrap() as i16,
+                    intensity.unwrap(),
+                    scan_ref.unwrap(),
+                );
+                (peak, segment_id.unwrap())
+            }
+        )
+    }
+
+    fn to_batch(
+        batch: &[Self],
+        schema: arrow::datatypes::SchemaRef,
+        segment_id: u64,
+    ) -> Result<RecordBatch, arrow::error::ArrowError> {
+        peaks_to_arrow(batch, schema, segment_id)
+    }
+
+    fn archive_name() -> String {
+        "peaks.parquet".into()
+    }
+
+    fn writer_properties() -> WriterPropertiesBuilder {
+        WriterProperties::builder()
+            .set_column_encoding("segment_id".into(), parquet::basic::Encoding::RLE)
+            .set_column_encoding("mass".into(), parquet::basic::Encoding::BYTE_STREAM_SPLIT)
+    }
+}
+
+impl ArrowStorage for Spectrum {
+    fn schema() -> arrow::datatypes::SchemaRef {
+        make_spectrum_schema()
+    }
+
+    fn from_batch<'a>(
+        batch: &'a RecordBatch,
+        _schema: arrow::datatypes::SchemaRef,
+    ) -> impl Iterator<Item = (Self, u64)> + 'a {
+        let mass = batch
+            .column_by_name("precursor_mass")
+            .unwrap()
+            .as_primitive::<Float32Type>();
+        let charge = batch
+            .column_by_name("precursor_charge")
+            .unwrap()
+            .as_primitive::<Int32Type>();
+        let source_file_id = batch
+            .column_by_name("source_file_id")
+            .unwrap()
+            .as_primitive::<UInt32Type>();
+        let scan_number = batch
+            .column_by_name("scan_number")
+            .unwrap()
+            .as_primitive::<UInt32Type>();
+        let sort_id = batch
+            .column_by_name("sort_id")
+            .unwrap()
+            .as_primitive::<UInt32Type>();
+        let b: Vec<_> = izip!(mass, charge, source_file_id, scan_number, sort_id)
+            .map(
+                |(precursor_mass, precursor_charge, source_file_id, scan_number, sort_id)| {
+                    Spectrum::new(
+                        precursor_mass.unwrap(),
+                        precursor_charge.unwrap(),
+                        source_file_id.unwrap(),
+                        scan_number.unwrap(),
+                        sort_id.unwrap(),
+                    )
+                },
+            )
+            .collect();
+        b.into_iter().map(|p| (p, 0))
+    }
+
+    fn to_batch(
+        batch: &[Self],
+        schema: arrow::datatypes::SchemaRef,
+        _segment_id: u64,
+    ) -> Result<RecordBatch, arrow::error::ArrowError> {
+        spectra_to_arrow(batch, schema)
+    }
+
+    fn archive_name() -> String {
+        "spectra.parquet".into()
+    }
+
+    fn writer_properties() -> WriterPropertiesBuilder {
+        WriterProperties::builder()
+            .set_column_encoding("precursor_mass".into(), parquet::basic::Encoding::BYTE_STREAM_SPLIT)
+    }
 }
 
 pub fn write_peak_index<P: AsRef<Path>>(

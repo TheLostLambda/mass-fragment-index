@@ -14,6 +14,7 @@ use arrow::array::{
     StringBuilder, StringDictionaryBuilder, UInt16Builder, UInt32Array, UInt32Builder, UInt64Array,
     UInt64Builder,
 };
+use arrow::datatypes::SchemaRef;
 use arrow::datatypes::Utf8Type;
 use arrow::datatypes::{
     DataType, Field, Float32Type, Int32Type, Schema, UInt16Type, UInt32Type, UInt8Type,
@@ -28,6 +29,7 @@ use parquet::basic::Compression;
 use parquet::basic::ZstdLevel;
 use parquet::{arrow::ArrowWriter, file::properties::*};
 
+use super::util::ArrowStorage;
 use crate::index::SearchIndex;
 use crate::sort::IndexBin;
 use crate::sort::SortType;
@@ -86,6 +88,112 @@ pub fn make_meta_schema() -> Arc<Schema> {
     let bins_per_dalton = afield!("bins_per_dalton", DataType::UInt32);
     let max_mass = afield!("max_item_mass", DataType::Float32);
     Arc::new(Schema::new(vec![bins_per_dalton, max_mass]))
+}
+
+impl ArrowStorage for Peptide {
+    fn schema() -> SchemaRef {
+        make_peptide_schema()
+    }
+
+    fn from_batch<'a>(batch: &'a RecordBatch, schema: SchemaRef) -> impl Iterator<Item=(Self, u64)> + 'a {
+        let mass = batch
+            .column_by_name("mass")
+            .unwrap()
+            .as_primitive::<Float32Type>();
+        let start_position = batch
+            .column_by_name("start_position")
+            .unwrap()
+            .as_primitive::<UInt16Type>();
+        let protein_id = batch
+            .column_by_name("protein_id")
+            .unwrap()
+            .as_primitive::<UInt32Type>();
+        let sequence = batch.column_by_name("sequence").unwrap().as_string::<i32>();
+        let id = batch.column_by_name("id").unwrap().as_primitive::<UInt32Type>();
+        izip!(mass, start_position, protein_id, sequence, id)
+            .map(|(mass, start_position, protein_id, sequence, id)| {
+                (
+                    Peptide::new(
+                        mass.unwrap(),
+                        id.unwrap(),
+                        protein_id.unwrap(),
+                        start_position.unwrap(),
+                        sequence.unwrap().to_string(),
+                    ),
+                    0
+                )
+            })
+    }
+
+    fn to_batch(batch: &[Self], schema: SchemaRef, segment_id: u64) -> Result<RecordBatch, arrow::error::ArrowError> {
+        peptide_to_arrow(batch, schema)
+    }
+
+    fn archive_name() -> String {
+        "peptides.parquet".to_string()
+    }
+
+    fn writer_properties() -> WriterPropertiesBuilder {
+        WriterProperties::builder()
+            .set_column_encoding("mass".into(), parquet::basic::Encoding::BYTE_STREAM_SPLIT)
+    }
+}
+
+impl ArrowStorage for Fragment {
+    fn schema() -> SchemaRef {
+        make_fragment_schema()
+    }
+
+    fn archive_name() -> String {
+        "fragments.parquet".into()
+    }
+
+    fn to_batch(batch: &[Self], schema: SchemaRef, segment_id: u64) -> Result<RecordBatch, arrow::error::ArrowError> {
+        fragment_to_arrow(batch, schema, segment_id)
+    }
+
+    fn from_batch<'a>(batch: &'a RecordBatch, schema: SchemaRef) -> impl Iterator<Item=(Self, u64)> + 'a {
+        let mass = field_of!(batch, "mass")
+            .as_any()
+            .downcast_ref::<Float32Array>()
+            .unwrap();
+        let ordinal = field_of!(batch, "ordinal")
+            .as_any()
+            .downcast_ref::<UInt16Array>()
+            .unwrap();
+        let series = field_of!(batch, "series")
+            .as_dictionary::<UInt8Type>()
+            .values()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let parent_id = field_of!(batch, "parent_id")
+            .as_any()
+            .downcast_ref::<UInt32Array>()
+            .unwrap();
+        let segment_id = field_of!(batch, "segment_id")
+            .as_any()
+            .downcast_ref::<UInt64Array>()
+            .unwrap();
+
+        izip!(mass, series, ordinal, parent_id, segment_id).map(
+            |(mass, series, ordinal, parent_id, segment_id)| {
+                let peak = Fragment::new(
+                    mass.unwrap(),
+                    parent_id.unwrap(),
+                    series.unwrap().parse().unwrap(),
+                    ordinal.unwrap() as u16,
+                );
+                (peak, segment_id.unwrap())
+            }
+        )
+    }
+
+    fn writer_properties() -> WriterPropertiesBuilder {
+        WriterProperties::builder()
+            .set_column_encoding("mass".into(), parquet::basic::Encoding::BYTE_STREAM_SPLIT)
+            .set_column_encoding("segment_id".into(), parquet::basic::Encoding::RLE)
+    }
 }
 
 pub fn peptide_to_arrow(

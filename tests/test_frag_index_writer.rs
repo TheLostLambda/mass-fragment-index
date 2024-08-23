@@ -75,12 +75,12 @@ fn build_index<R: io::BufRead>(reader: R) -> io::Result<SearchIndex<Fragment, Pe
 #[test]
 fn test_index_build_traversal() -> io::Result<()> {
     let reader = io::BufReader::new(fs::File::open("tests/data/test_data.csv")?);
-    let search_index = build_index(reader)?;
+    let search_index: SearchIndex<Fragment, Peptide> = build_index(reader)?;
 
     let tmpdir = tempfile::tempdir()?;
-    write_fragment_index(&search_index, &tmpdir.path(), None)?;
+    search_index.write_parquet(&tmpdir.path(), None)?;
 
-    let duplicate_index = read_fragment_index(&tmpdir.path())?;
+    let duplicate_index = SearchIndex::<Fragment, Peptide>::read_parquet(&tmpdir.path())?;
     assert_eq!(duplicate_index.parents.len(), search_index.parents.len());
 
     Ok(())
