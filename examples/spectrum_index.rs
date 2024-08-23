@@ -4,10 +4,8 @@ use mzdata::{io::DetailLevel, prelude::*, MzMLReader};
 
 use mass_fragment_index::{
     sort::SortType,
-    storage::{read_peak_index, write_peak_index},
     DeconvolutedPeak, DeconvolutedSpectrumIndex, Spectrum,
 };
-use parquet::basic::ZstdLevel;
 
 fn main() -> io::Result<()> {
     let mut args = env::args().skip(1);
