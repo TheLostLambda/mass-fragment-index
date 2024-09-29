@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::io;
+use std::iter::FusedIterator;
 
 #[cfg(feature = "serde")]
 use serde::{Serialize, Deserialize};
@@ -11,7 +12,7 @@ use rayon::prelude::*;
 use crate::storage::{ArrowStorage, IndexBinaryStorage, IndexMetadata};
 
 use crate::interval::Interval;
-use crate::sort::{IndexBin, IndexSortable, MassType, SortType, Tolerance};
+use crate::sort::{IndexBin, IndexSortable, MassType, ParentSortedIndexBinSearchIter, SortType, Tolerance};
 
 #[derive(Debug, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -56,20 +57,6 @@ impl<T: IndexSortable + Default, P: IndexSortable + Default> SearchIndex<T, P> {
 
     pub fn iter_bins(&self) -> std::slice::Iter<'_, IndexBin<T>> {
         self.bins.iter()
-    }
-
-    pub fn describe_bins(&self) {
-        for (i, bin, bin_mass) in self.bins.iter().enumerate().map(|(i, bin)| {
-            (
-                i,
-                bin,
-                (i as MassType) * 1.0 / self.bins_per_dalton as MassType,
-            )
-        }) {
-            if bin.len() > 0 {
-                println!("Bin {} @ {:0.3} has {} elements", i, bin_mass, bin.len());
-            }
-        }
     }
 
     pub fn new(
@@ -148,39 +135,8 @@ impl<T: IndexSortable + Default, P: IndexSortable + Default> SearchIndex<T, P> {
         query: MassType,
         error_tolerance: Tolerance,
         parent_interval: Option<Interval>,
-    ) -> SearchIndexSearcher<T, P> {
-        let (low, high) = error_tolerance.bounds(query);
-        let mut low_bin = self.bin_for_mass(low);
-        let mut high_bin = self.bin_for_mass(high);
-
-        if low_bin != 0 {
-            if self.bins[low_bin].max_mass < low {
-                low_bin -= 1;
-            }
-        }
-
-        if high_bin < self.bins.len() - 2 {
-            high_bin += 1;
-            if self.bins[high_bin].min_mass > high {
-                high_bin -= 1;
-            }
-        }
-
-        let parent_interval_used = match parent_interval {
-            Some(iv) => iv,
-            None => Interval::new(0, self.parents.len()),
-        };
-
-        SearchIndexSearcher::new(
-            self,
-            query,
-            error_tolerance,
-            low_bin,
-            high_bin,
-            low_bin,
-            0,
-            parent_interval_used,
-        )
+    ) -> SearchIndexSearchIter<'_, T, P> {
+        SearchIndexSearchIter::new(self, query, error_tolerance, parent_interval.unwrap_or_else(|| Interval::new(0, self.parents.len())))
     }
 
     pub fn bins_per_dalton(&self) -> u32 {
@@ -246,313 +202,125 @@ impl<'a, T: IndexSortable + Default + ArrowStorage + 'a, P: IndexSortable + Defa
 }
 
 
-#[derive(Debug, Clone)]
-pub struct SearchIndexSearcher<'a, T: IndexSortable + Default, P: IndexSortable + Default> {
+pub struct SearchIndexBinIter<'a, T: IndexSortable + Default, P: IndexSortable + Default> {
     index: &'a SearchIndex<T, P>,
     pub query: MassType,
     pub error_tolerance: Tolerance,
     pub low_bin: usize,
     pub high_bin: usize,
     pub current_bin: usize,
-    pub bin_position_range: Interval,
-    pub bin_position: usize,
-    pub parent_id_range: Interval,
-    pub query_spans_bin: bool,
 }
 
-impl<'a, T: IndexSortable + Default, P: IndexSortable + Default> SearchIndexSearcher<'a, T, P> {
-    pub fn new(
-        index: &'a SearchIndex<T, P>,
-        query: MassType,
-        error_tolerance: Tolerance,
-        low_bin: usize,
-        high_bin: usize,
-        current_bin: usize,
-        position: usize,
-        parent_id_range: Interval,
-    ) -> Self {
-        let mut inst = Self {
+impl<'a, T: IndexSortable + Default, P: IndexSortable + Default> ExactSizeIterator
+    for SearchIndexBinIter<'a, T, P>
+{
+    fn len(&self) -> usize {
+        self.high_bin.saturating_sub(self.low_bin)
+    }
+}
+
+impl<'a, T: IndexSortable + Default, P: IndexSortable + Default> FusedIterator
+    for SearchIndexBinIter<'a, T, P>
+{
+}
+
+impl<'a, T: IndexSortable + Default, P: IndexSortable + Default> Iterator
+    for SearchIndexBinIter<'a, T, P>
+{
+    type Item = &'a IndexBin<T>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next_bin()
+    }
+}
+
+impl<'a, T: IndexSortable + Default, P: IndexSortable + Default> SearchIndexBinIter<'a, T, P> {
+    pub fn new(index: &'a SearchIndex<T, P>, query: MassType, error_tolerance: Tolerance) -> Self {
+        let (low_mass, high_mass) = error_tolerance.bounds(query);
+        let low_bin = index.bin_for_mass(low_mass);
+        let high_bin = (index.bin_for_mass(high_mass) + 1).min(index.bins.len());
+        Self {
             index,
             query,
             error_tolerance,
             low_bin,
             high_bin,
-            current_bin,
-            bin_position_range: Interval { start: 0, end: 0 },
-            bin_position: position,
-            parent_id_range,
-            query_spans_bin: false,
-        };
-
-        inst.initialize_position_range();
-        inst
-    }
-
-    /// Update the `query_spans_bin` flag to indicate whether we can assume that the mass accuracy
-    /// requirement is guaranteed and we can skip checking it.
-    fn _update_bin_state(&mut self) {
-        if self.current_bin == self.index.bins.len() - 1 {
-            self.query_spans_bin = false
-        } else {
-            let current_bin = self.get_current_bin();
-            let (lo, hi) = self.min_max_mass_acceptable();
-            if lo <= current_bin.min_mass && hi >= current_bin.max_mass {
-                self.query_spans_bin = true
-            } else {
-                self.query_spans_bin = false
-            }
+            current_bin: low_bin,
         }
     }
 
-    /// Compute the minimum and maximum acceptable masses
-    fn min_max_mass_acceptable(&self) -> (MassType, MassType) {
-        self.error_tolerance.bounds(self.query)
-    }
-
-    /// Peek at the next item this iterator would yield.
-    /// This might be unsafe because it doesn't check if the
-    /// next position is valid
-    pub fn peek(&self) -> &T {
-        let bin = self.get_current_bin();
-        &bin[self.bin_position]
-    }
-
-    /// Advance the iterator to the next valid bin position
-    /// and possibly the next bin, or terminate in an unusable
-    /// state
-    fn advance(&mut self) -> bool {
-        let current_bin = &self.index.bins[self.current_bin];
-        let mut hit = false;
-        hit = match self.index.sort_type {
-            SortType::ByMass => {
-                self.bin_position += 1;
-                while self.current_bin_has_more() && self.bin_position < self.bin_position_range.end
-                {
-                    if self.is_peek_valid() {
-                        hit = true;
-                        break;
-                    }
-                    self.bin_position += 1;
-                }
-                hit
-            }
-            SortType::ByParentId => {
-                self.bin_position += 1;
-                for i in self.bin_position..self.bin_position_range.end {
-                    self.bin_position = i;
-                    if self._test_entry(&current_bin[i]) {
-                        hit = true;
-                        break;
-                    }
-                }
-                hit
-            }
-            SortType::Unsorted => true,
-        };
-        if !hit {
-            self.bin_position = self.bin_position_range.end;
-        }
-        hit
-    }
-
-    /// Update the `bin_position_range` and `bin_position` for a new bin when
-    /// sorted by product mass
-    fn _update_position_range_from_mass_sort(&mut self, current_bin: &IndexBin<T>) -> bool {
-        self.bin_position_range = current_bin.search_mass(self.query, self.error_tolerance);
-        self.bin_position = self.bin_position_range.start;
-        let mut hit = false;
-        for i in self.bin_position..current_bin.len() {
-            if !self.parent_id_range.contains(current_bin[i].parent_id() as usize) {
-                continue;
-            } else {
-                self.bin_position_range.start = i;
-                hit = true;
-                break;
-            }
-        }
-        if !hit {
-            self.bin_position_range.start = current_bin.len();
-        }
-        self.bin_position = self.bin_position_range.start;
-        hit
-    }
-
-    /// Update the `bin_position_range` and `bin_position` for a new bin when
-    /// sorted by parent id
-    fn _update_position_range_from_parent_id_sort(&mut self, current_bin: &IndexBin<T>) -> bool {
-        // Starting from the start of the bin, walk along it sequentially until we find a
-        // valid entry.
-        self.bin_position_range.start = 0;
-        self.bin_position_range.end = current_bin.len();
-        let mut hit = false;
-        let guess_range = current_bin.search_parent_id(self.parent_id_range);
-        let starting_guess = if guess_range.start > 0 {
-            guess_range.start - 1
-        } else {
-            0
-        };
-        self.bin_position_range.end = (guess_range.end + 1).min(current_bin.len());
-        self.bin_position_range.start = starting_guess;
-        for i in starting_guess..current_bin.len() {
-            if self._test_entry(&current_bin[i]) {
-                self.bin_position_range.start = i;
-                hit = true;
-                break;
-            }
-        }
-        if !hit {
-            self.bin_position_range.start = current_bin.len();
-        }
-        hit
-    }
-
-    /// Peek if the next position is valid
-    fn is_peek_valid(&self) -> bool {
-        if self.current_bin_has_more() {
-            match self.index.sort_type {
-                SortType::ByParentId => self._test_entry(self.peek()),
-                SortType::ByMass => self._test_entry(self.peek()),
-                SortType::Unsorted => true,
-            }
-        } else {
-            false
-        }
-    }
-
-    /// Test if the entry is valid under parent id sorting
     #[inline(always)]
-    fn _test_entry(&self, entry: &T) -> bool {
-        let entry_parent_id = entry.parent_id();
-        if !self.parent_id_range.contains(entry_parent_id as usize) {
-            return false;
-        }
-        let entry_mass = entry.mass();
-        self.error_tolerance.test(self.query, entry_mass)
-        // if self.query_spans_bin {
-        //     true
-        // } else {
-        //     let entry_mass = entry.mass();
-        //     self.error_tolerance.test(self.query, entry_mass)
-        // }
-    }
-
-    fn update_bin(&mut self) -> bool {
-        let mut hit = false;
-        self.query_spans_bin = false;
-        while (self.current_bin <= self.high_bin)
-            && ((self.current_bin + 1) < self.index.bins.len())
-        {
+    fn next_bin(&mut self) -> Option<&'a IndexBin<T>> {
+        if self.current_bin < self.high_bin {
+            let bin = unsafe { self.index.bins.get_unchecked(self.current_bin) };
             self.current_bin += 1;
-            let current_bin = &self.index.bins[self.current_bin];
-            hit = match self.index.sort_type {
-                SortType::ByMass => self._update_position_range_from_mass_sort(current_bin),
-                SortType::ByParentId => {
-                    self._update_position_range_from_parent_id_sort(current_bin)
-                }
-                SortType::Unsorted => true,
-            };
-
-            self.bin_position = self.bin_position_range.start;
-            if self.current_bin_has_more() {
-                self._update_bin_state();
-                break;
-            }
+            Some(bin)
+        } else {
+            None
         }
-        hit
-    }
-
-    fn next_entry(&mut self) -> Option<&'a T> {
-        let mut entry = None;
-        let mut hit = false;
-        if self.bin_position < self.bin_position_range.end {
-            assert!(self._test_entry(&(self.index.bins[self.current_bin])[self.bin_position]));
-            entry = Some(&(self.index.bins[self.current_bin])[self.bin_position]);
-            hit = self.advance();
-        }
-
-        if self.bin_position >= self.bin_position_range.end
-            || self.bin_position >= self.get_current_bin().len()
-            || !hit
-        {
-            self.update_bin();
-        }
-
-        entry
-    }
-
-    fn get_current_bin(&self) -> &IndexBin<T> {
-        &self.index.bins[self.current_bin]
-    }
-
-    fn current_bin_has_more(&self) -> bool {
-        let bin = self.get_current_bin();
-        self.bin_position < bin.len()
-    }
-
-    fn initialize_position_range(&mut self) -> bool {
-        let current_bin = &self.index.bins[self.current_bin];
-        self.bin_position_range.start = 0;
-        self.bin_position_range.end = current_bin.len();
-        self.bin_position = 0;
-        self.query_spans_bin = false;
-        match self.index.sort_type {
-            SortType::ByMass => {
-                let result = current_bin.search_mass(self.query, self.error_tolerance);
-                self.bin_position_range = result;
-                if !self.advance() {
-                    self.bin_position_range.start = self.bin_position_range.end;
-                } else {
-                    self.bin_position_range.start = self.bin_position;
-                }
-            }
-            SortType::ByParentId => {
-                let mut hit = false;
-                let guess_range = current_bin.search_parent_id(self.parent_id_range);
-                let starting_guess = if guess_range.start > 0 {
-                    guess_range.start - 1
-                } else {
-                    0
-                };
-                self.bin_position_range.end = (guess_range.end + 1).min(current_bin.len());
-                self.bin_position_range.start = starting_guess;
-
-                for i in starting_guess..current_bin.len() {
-                    if self._test_entry(&current_bin[i]) {
-                        hit = true;
-                        self.bin_position_range.start = i;
-                        break;
-                    }
-                }
-
-                if !hit {
-                    self.bin_position_range.start = self.bin_position_range.end;
-                }
-            }
-            SortType::Unsorted => {}
-        }
-        self.bin_position = self.bin_position_range.start;
-        if self.bin_position == self.bin_position_range.end {
-            if self.current_bin <= self.high_bin {
-                self.current_bin += 1;
-                return self.initialize_position_range();
-            }
-            return true;
-        }
-        self._update_bin_state();
-        return false;
     }
 }
 
+pub struct SearchIndexSearchIter<'a, T: IndexSortable + Default, P: IndexSortable + Default> {
+    pub query: MassType,
+    pub error_tolerance: Tolerance,
+    pub parent_range: Interval,
+    bin_iter: SearchIndexBinIter<'a, T, P>,
+    item_iter: Option<ParentSortedIndexBinSearchIter<'a, T>>,
+}
+
 impl<'a, T: IndexSortable + Default, P: IndexSortable + Default> Iterator
-    for SearchIndexSearcher<'a, T, P>
+    for SearchIndexSearchIter<'a, T, P>
 {
     type Item = &'a T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(entry) = self.next_entry() {
-            Some(entry)
-        } else {
-            None
+        self.next_entry()
+    }
+}
+
+impl<'a, T: IndexSortable + Default, P: IndexSortable + Default> SearchIndexSearchIter<'a, T, P> {
+    pub fn new(
+        index: &'a SearchIndex<T, P>,
+        query: MassType,
+        error_tolerance: Tolerance,
+        parent_range: Interval,
+    ) -> Self {
+        let bin_iter = SearchIndexBinIter::new(index, query, error_tolerance);
+        let mut this = Self {
+            query,
+            error_tolerance,
+            parent_range,
+            bin_iter,
+            item_iter: None,
+        };
+        this.next_bin_iterator();
+        this
+    }
+
+    #[inline(always)]
+    fn next_bin_iterator(&mut self) -> bool {
+        self.item_iter = self.bin_iter.next().map(|bin| {
+            ParentSortedIndexBinSearchIter::new(
+                bin,
+                self.parent_range,
+                self.query,
+                self.error_tolerance,
+            )
+        });
+        self.item_iter.is_some()
+    }
+
+    #[inline(always)]
+    fn next_entry(&mut self) -> Option<&'a T> {
+        loop {
+            if let Some(t) = self.item_iter.as_mut().and_then(|it| it.next()) {
+                return Some(t);
+            } else {
+                if !self.next_bin_iterator() {
+                    return None;
+                }
+            }
         }
     }
 }

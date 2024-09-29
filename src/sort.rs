@@ -1,8 +1,5 @@
 use std::{
-    error::Error,
-    fmt::Display,
-    ops::{Index, Mul},
-    str::FromStr,
+    error::Error, fmt::Display, iter::FusedIterator, ops::{Index, Mul}, str::FromStr
 };
 
 #[cfg(feature = "serde")]
@@ -231,6 +228,10 @@ impl<T: IndexSortable> IndexBin<T> {
         self.entries.first()
     }
 
+    pub fn get(&self, index: usize) -> Option<&T> {
+        self.entries.get(index)
+    }
+
     pub fn last(&self) -> Option<&T> {
         self.entries.last()
     }
@@ -351,6 +352,60 @@ impl<T: IndexSortable> From<Vec<T>> for IndexBin<T> {
         this
     }
 }
+
+#[derive(Debug)]
+pub struct ParentSortedIndexBinSearchIter<'a, T: IndexSortable> {
+    bin_iter: std::slice::Iter<'a, T>,
+    parent_range: Interval,
+    query: f32,
+    error_tolerance: Tolerance,
+    spanned: bool,
+}
+
+impl<'a, T: IndexSortable> FusedIterator for ParentSortedIndexBinSearchIter<'a, T> {}
+
+impl<'a, T: IndexSortable> Iterator for ParentSortedIndexBinSearchIter<'a, T> {
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next_entry()
+    }
+}
+
+impl<'a, T: IndexSortable> ParentSortedIndexBinSearchIter<'a, T> {
+    pub fn new(
+        bin: &'a IndexBin<T>,
+        parent_range: Interval,
+        query: f32,
+        error_tolerance: Tolerance,
+    ) -> Self {
+        let bin_iter = bin.iter();
+        let (lo, hi) = error_tolerance.bounds(query);
+        let spanned = lo <= bin.min_mass && hi >= bin.max_mass;
+        Self {
+            bin_iter,
+            parent_range,
+            query,
+            error_tolerance,
+            spanned,
+        }
+    }
+
+    fn next_entry(&mut self) -> Option<&'a T> {
+        while let Some(t) = self.bin_iter.next() {
+            if self.spanned && self.parent_range.contains(t.parent_id() as usize) {
+                return Some(t);
+            }
+            if self.error_tolerance.test(self.query, t.mass())
+                && self.parent_range.contains(t.parent_id() as usize)
+            {
+                return Some(t);
+            }
+        }
+        None
+    }
+}
+
 
 #[cfg(test)]
 mod test {
