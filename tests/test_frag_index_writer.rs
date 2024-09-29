@@ -11,6 +11,7 @@ use mass_fragment_index::parent::Peptide;
 use mass_fragment_index::sort::{MassType, ParentID, SortType};
 
 use mass_fragment_index::storage::{read_fragment_index, write_fragment_index};
+use mass_fragment_index::Tolerance;
 
 fn parse_csv<R: io::BufRead>(reader: R) -> io::Result<Vec<(Peptide, Vec<Fragment>)>> {
     let mut csv_reader = csv::Reader::from_reader(reader);
@@ -78,10 +79,20 @@ fn test_index_build_traversal() -> io::Result<()> {
     let search_index: SearchIndex<Fragment, Peptide> = build_index(reader)?;
 
     let tmpdir = tempfile::tempdir()?;
-    search_index.write_parquet(&tmpdir.path(), None)?;
+    let tmpdir_path = tmpdir.path();
+    search_index.write_parquet(&tmpdir_path, None)?;
 
-    let duplicate_index = SearchIndex::<Fragment, Peptide>::read_parquet(&tmpdir.path())?;
+    let duplicate_index = SearchIndex::<Fragment, Peptide>::read_parquet(&tmpdir_path)?;
     assert_eq!(duplicate_index.parents.len(), search_index.parents.len());
+    assert_eq!(duplicate_index.num_entries(), search_index.num_entries());
+
+    let parent_interval = search_index.parents_for_range(200.0, 1200.0, Tolerance::PPM(10.0));
+    let search: Vec<_> = search_index.search(113.08406397713001, Tolerance::PPM(10.0), Some(parent_interval)).collect();
+    assert_eq!(search.len(), 504);
+
+    let parent_interval = duplicate_index.parents_for_range(200.0, 1200.0, Tolerance::PPM(10.0));
+    let dup_search: Vec<_> = duplicate_index.search(113.08406397713001, Tolerance::PPM(10.0), Some(parent_interval)).collect();
+    assert_eq!(dup_search.len(), 504);
 
     Ok(())
 }
