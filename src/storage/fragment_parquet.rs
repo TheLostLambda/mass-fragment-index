@@ -163,9 +163,7 @@ impl ArrowStorage for Fragment {
             .unwrap();
         let series = field_of!(batch, "series")
             .as_dictionary::<UInt8Type>()
-            .values()
-            .as_any()
-            .downcast_ref::<StringArray>()
+            .downcast_dict::<StringArray>()
             .unwrap();
         let parent_id = field_of!(batch, "parent_id")
             .as_any()
