@@ -1,18 +1,24 @@
-use std::collections::HashMap;
-use std::fs;
-use std::sync::Arc;
-use std::{io, path::Path};
+use std::{
+    collections::HashMap,
+    fs, io,
+    marker::PhantomData,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
-use arrow::array::{ArrayRef, AsArray, Float32Array, RecordBatch, UInt32Array};
-use arrow::datatypes::{DataType, Field, Float32Type, Schema, SchemaRef, UInt32Type};
-use arrow::error::ArrowError;
-use arrow::json::{LineDelimitedWriter, ReaderBuilder as JSONReaderBuilder};
-use parquet::arrow::arrow_reader::ArrowReaderBuilder;
-use parquet::arrow::ArrowWriter;
-use parquet::basic::{Compression, ZstdLevel};
-use parquet::file::properties::{WriterProperties, WriterPropertiesBuilder};
+use arrow::{
+    array::{ArrayRef, AsArray, Float32Array, RecordBatch, UInt32Array},
+    datatypes::{DataType, Field, Float32Type, Schema, SchemaRef, UInt32Type},
+    error::ArrowError,
+    json::{LineDelimitedWriter, ReaderBuilder as JSONReaderBuilder},
+};
+use parquet::{
+    arrow::{arrow_reader::ArrowReaderBuilder, ArrowWriter},
+    basic::{Compression, ZstdLevel},
+    file::properties::{WriterProperties, WriterPropertiesBuilder},
+};
 
-use crate::MassType;
+use crate::{IndexSortable, Interval, MassType, SearchIndex, Tolerance};
 
 pub trait ArrowStorage: Sized {
     fn schema() -> SchemaRef;
@@ -31,6 +37,18 @@ pub trait ArrowStorage: Sized {
     fn archive_name() -> String;
 
     fn writer_properties() -> WriterPropertiesBuilder;
+
+    fn mass_column() -> Option<usize> {
+        None
+    }
+
+    fn parent_id_column() -> Option<usize> {
+        None
+    }
+
+    fn sort_id_column() -> Option<usize> {
+        None
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -124,9 +142,7 @@ pub trait IndexBinaryStorage<'a, T: ArrowStorage + 'a, P: ArrowStorage, M: Arrow
             let mut writer = LineDelimitedWriter::new(meta_fh);
             let metadata = M::to_batch(&[metadata], meta_schema, 0).unwrap();
 
-            writer
-                .write(&metadata)
-                .unwrap();
+            writer.write(&metadata).unwrap();
             writer.finish().unwrap();
         }
 
@@ -136,8 +152,11 @@ pub trait IndexBinaryStorage<'a, T: ArrowStorage + 'a, P: ArrowStorage, M: Arrow
             let props = P::writer_properties()
                 .set_compression(compression_level.clone())
                 .build();
-            let mut writer =
-                ArrowWriter::try_new(fs::File::create(parent_path)?, parent_schema.clone(), Some(props))?;
+            let mut writer = ArrowWriter::try_new(
+                fs::File::create(parent_path)?,
+                parent_schema.clone(),
+                Some(props),
+            )?;
             let batch = P::to_batch(self.parents(), parent_schema.clone(), 0).unwrap();
             writer.write(&batch)?;
             writer.close()?;
@@ -149,8 +168,11 @@ pub trait IndexBinaryStorage<'a, T: ArrowStorage + 'a, P: ArrowStorage, M: Arrow
             let props = T::writer_properties()
                 .set_compression(compression_level.clone())
                 .build();
-            let mut writer =
-                ArrowWriter::try_new(fs::File::create(entries_path)?, entries_schema.clone(), Some(props))?;
+            let mut writer = ArrowWriter::try_new(
+                fs::File::create(entries_path)?,
+                entries_schema.clone(),
+                Some(props),
+            )?;
             for (i, bin) in self.iter_entries().enumerate() {
                 let batch = T::to_batch(bin, entries_schema.clone(), i as u64).unwrap();
                 writer.write(&batch)?;
@@ -163,7 +185,7 @@ pub trait IndexBinaryStorage<'a, T: ArrowStorage + 'a, P: ArrowStorage, M: Arrow
 
     fn parents(&self) -> &[P];
 
-    fn iter_entries(&'a self) -> impl Iterator<Item=&'a [T]> + 'a;
+    fn iter_entries(&'a self) -> impl Iterator<Item = &'a [T]> + 'a;
 
     fn to_metadata(&self) -> M;
 
@@ -171,8 +193,8 @@ pub trait IndexBinaryStorage<'a, T: ArrowStorage + 'a, P: ArrowStorage, M: Arrow
 
     fn read<D: AsRef<Path>>(directory: &D) -> io::Result<Self>
     where
-        Self: Sized {
-
+        Self: Sized,
+    {
         let parents_path = directory.as_ref().join(P::archive_name());
         let entries_path = directory.as_ref().join(T::archive_name());
         let meta_path = directory.as_ref().join(M::archive_name());
@@ -180,13 +202,16 @@ pub trait IndexBinaryStorage<'a, T: ArrowStorage + 'a, P: ArrowStorage, M: Arrow
         let metadata = {
             let meta_schema = M::schema();
             let meta_fh = io::BufReader::new(fs::File::open(meta_path)?);
-            let meta_rec = JSONReaderBuilder::new(meta_schema.clone()).build(meta_fh)
+            let meta_rec = JSONReaderBuilder::new(meta_schema.clone())
+                .build(meta_fh)
                 .unwrap()
                 .next()
                 .unwrap()
                 .unwrap();
 
-            let (metadata, _) = M::from_batch(&meta_rec, meta_schema.clone()).next().unwrap();
+            let (metadata, _) = M::from_batch(&meta_rec, meta_schema.clone())
+                .next()
+                .unwrap();
             metadata
         };
 
@@ -197,7 +222,8 @@ pub trait IndexBinaryStorage<'a, T: ArrowStorage + 'a, P: ArrowStorage, M: Arrow
             let reader = ArrowReaderBuilder::try_new(parents_fh)?.build()?;
             let mut parents = Vec::new();
             for batch in reader {
-                parents.extend(P::from_batch(&batch.unwrap(), parent_schema.clone()).map(|(p, _)| p));
+                parents
+                    .extend(P::from_batch(&batch.unwrap(), parent_schema.clone()).map(|(p, _)| p));
             }
 
             parents
@@ -211,10 +237,7 @@ pub trait IndexBinaryStorage<'a, T: ArrowStorage + 'a, P: ArrowStorage, M: Arrow
 
             for batch in reader {
                 for (entry, segment_id) in T::from_batch(&batch.unwrap(), entry_schema.clone()) {
-                    bin_collector
-                        .entry(segment_id)
-                        .or_default()
-                        .push(entry);
+                    bin_collector.entry(segment_id).or_default().push(entry);
                 }
             }
 
@@ -223,5 +246,99 @@ pub trait IndexBinaryStorage<'a, T: ArrowStorage + 'a, P: ArrowStorage, M: Arrow
 
         let this = Self::from_components(metadata, parents, entries);
         Ok(this)
+    }
+}
+
+#[derive(Debug)]
+pub struct SearchIndexOnDisk<
+    T: ArrowStorage + IndexSortable + Default,
+    P: ArrowStorage + IndexSortable + Default,
+    M: ArrowStorage + Default,
+> {
+    root: PathBuf,
+    pub metadata: M,
+    _t: PhantomData<T>,
+    _p: PhantomData<P>,
+    _index: PhantomData<SearchIndex<T, P>>,
+}
+
+#[allow(unused)]
+impl<
+        T: ArrowStorage + IndexSortable + Default,
+        P: ArrowStorage + IndexSortable + Default,
+        M: ArrowStorage + Default,
+    > SearchIndexOnDisk<T, P, M>
+{
+    pub fn new(path: PathBuf) -> io::Result<Self> {
+        if !path.exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("Index root {} not found", path.display()),
+            ));
+        }
+        if !path.join(M::archive_name()).exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("Index metadata {} not found", path.display()),
+            ));
+        }
+        if !path.join(P::archive_name()).exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("Index parent file {} not found", path.display()),
+            ));
+        }
+        if !path.join(T::archive_name()).exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("Index search target file {} not found", path.display()),
+            ));
+        }
+        let mut this = Self {
+            root: path,
+            metadata: M::default(),
+            _t: PhantomData,
+            _p: PhantomData,
+            _index: PhantomData,
+        };
+        this.metadata = this.read_metadata()?;
+        Ok(this)
+    }
+
+    fn read_metadata(&self) -> io::Result<M> {
+        let arch = self.root.join(M::archive_name());
+        let handle = io::BufReader::new(fs::File::open(arch)?);
+        let mut reader = JSONReaderBuilder::new(M::schema())
+            .build(handle)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let (meta, _) = M::from_batch(
+            &reader
+                .next()
+                .expect("No metadata record batch found")
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?,
+            M::schema(),
+        )
+        .next()
+        .unwrap();
+        Ok(meta)
+    }
+
+    pub fn parents_for(&self, mass: MassType, error_tolerance: Tolerance) -> Interval {
+        // let iv = self.parents.search_mass(mass, error_tolerance);
+        // iv
+        todo!()
+    }
+
+    pub fn parents_for_range(
+        &self,
+        low: MassType,
+        high: MassType,
+        error_tolerance: Tolerance,
+    ) -> Interval {
+        // let mut out = Interval::default();
+        // out.start = self.parents_for(low, error_tolerance).start;
+        // out.end = self.parents_for(high, error_tolerance).end;
+        // out
+        todo!()
     }
 }

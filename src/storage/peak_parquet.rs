@@ -145,6 +145,14 @@ impl ArrowStorage for DeconvolutedPeak {
         make_peak_schema()
     }
 
+    fn mass_column() -> Option<usize> {
+        Self::schema().column_with_name("mass").map(|(i, _)| i)
+    }
+
+    fn parent_id_column() -> Option<usize> {
+        Self::schema().column_with_name("scan_ref").map(|(i, _)| i)
+    }
+
     fn from_batch<'a>(
         batch: &'a RecordBatch,
         _schema: arrow::datatypes::SchemaRef,
@@ -204,6 +212,18 @@ impl ArrowStorage for DeconvolutedPeak {
 impl ArrowStorage for Spectrum {
     fn schema() -> arrow::datatypes::SchemaRef {
         make_spectrum_schema()
+    }
+
+    fn mass_column() -> Option<usize> {
+        Self::schema().column_with_name("precursor_mass").map(|(i, _)| i)
+    }
+
+    fn parent_id_column() -> Option<usize> {
+        Self::schema().column_with_name("source_file_id").map(|(i, _)| i)
+    }
+
+    fn sort_id_column() -> Option<usize> {
+        Self::schema().column_with_name("sort_id").map(|(i, _)| i)
     }
 
     fn from_batch<'a>(

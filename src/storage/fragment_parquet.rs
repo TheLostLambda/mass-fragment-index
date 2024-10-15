@@ -95,6 +95,18 @@ impl ArrowStorage for Peptide {
         make_peptide_schema()
     }
 
+    fn mass_column() -> Option<usize> {
+        Self::schema().column_with_name("mass").map(|(i, field)| i)
+    }
+
+    fn parent_id_column() -> Option<usize> {
+        Self::schema().column_with_name("protein_id").map(|(i, field)| i)
+    }
+
+    fn sort_id_column() -> Option<usize> {
+        Self::schema().column_with_name("id").map(|(i, field)| i)
+    }
+
     fn from_batch<'a>(batch: &'a RecordBatch, schema: SchemaRef) -> impl Iterator<Item=(Self, u64)> + 'a {
         let mass = batch
             .column_by_name("mass")
@@ -142,6 +154,14 @@ impl ArrowStorage for Peptide {
 impl ArrowStorage for Fragment {
     fn schema() -> SchemaRef {
         make_fragment_schema()
+    }
+
+    fn mass_column() -> Option<usize> {
+        Self::schema().column_with_name("mass").map(|(i, field)| i)
+    }
+
+    fn parent_id_column() -> Option<usize> {
+        Self::schema().column_with_name("parent_id").map(|(i, field)| i)
     }
 
     fn archive_name() -> String {
