@@ -63,6 +63,22 @@ macro_rules! afield {
     };
 }
 
+macro_rules! as_array_ref {
+    ($a:expr) => {
+        Arc::new($a.finish()) as ArrayRef
+    };
+}
+
+macro_rules! field_of {
+    ($batch:expr, $name:expr) => {
+        $batch.column_by_name($name).unwrap()
+    };
+}
+
+pub(crate) use afield;
+pub(crate) use as_array_ref;
+pub(crate) use field_of;
+
 impl ArrowStorage for IndexMetadata {
     fn schema() -> SchemaRef {
         let bins_per_dalton = afield!("bins_per_dalton", DataType::UInt32);
