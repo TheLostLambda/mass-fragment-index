@@ -223,6 +223,7 @@ pub trait SplitIndexBinaryStorage<
         let entries_schema = T::schema();
         let props = T::writer_properties()
             .set_compression(compression_level.clone())
+            .set_column_encoding("band_id".into(), parquet::basic::Encoding::RLE)
             .build();
         let ext_schema = Self::make_item_schema();
         let mut writer = ArrowWriter::try_new(
