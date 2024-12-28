@@ -3,16 +3,18 @@ use std::io;
 use std::iter::FusedIterator;
 
 #[cfg(feature = "serde")]
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "parallelism")]
 use rayon::prelude::*;
 
 #[cfg(feature = "binary_storage")]
-use crate::storage::{ArrowStorage, IndexBinaryStorage, IndexMetadata};
+use crate::storage::{ArrowStorage, IndexBinaryStorage, IndexMetadata, SplitIndexBinaryStorage};
 
 use crate::interval::Interval;
-use crate::sort::{IndexBin, IndexSortable, MassType, ParentSortedIndexBinSearchIter, SortType, Tolerance};
+use crate::sort::{
+    IndexBin, IndexSortable, MassType, ParentSortedIndexBinSearchIter, SortType, Tolerance,
+};
 
 #[derive(Debug, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -97,7 +99,10 @@ impl<T: IndexSortable + Default, P: IndexSortable + Default> SearchIndex<T, P> {
     }
 
     #[cfg(feature = "parallelism")]
-    pub fn par_sort(&mut self, ordering: SortType) where T: Send {
+    pub fn par_sort(&mut self, ordering: SortType)
+    where
+        T: Send,
+    {
         self.bins.par_iter_mut().for_each(|bin| bin.sort(ordering));
         self.sort_type = ordering;
     }
@@ -136,7 +141,12 @@ impl<T: IndexSortable + Default, P: IndexSortable + Default> SearchIndex<T, P> {
         error_tolerance: Tolerance,
         parent_interval: Option<Interval>,
     ) -> SearchIndexSearchIter<'_, T, P> {
-        SearchIndexSearchIter::new(self, query, error_tolerance, parent_interval.unwrap_or_else(|| Interval::new(0, self.parents.len())))
+        SearchIndexSearchIter::new(
+            self,
+            query,
+            error_tolerance,
+            parent_interval.unwrap_or_else(|| Interval::new(0, self.parents.len())),
+        )
     }
 
     pub fn bins_per_dalton(&self) -> u32 {
@@ -153,54 +163,95 @@ impl<T: IndexSortable + Default, P: IndexSortable + Default> SearchIndex<T, P> {
 }
 
 #[cfg(feature = "binary_storage")]
-impl<'a, T: IndexSortable + Default + ArrowStorage + 'a, P: IndexSortable + Default + ArrowStorage + 'a> IndexBinaryStorage<'a, T, P, IndexMetadata> for SearchIndex<T, P> {
-    fn parents(&self) -> &[P] {
-        self.parents.as_slice()
-    }
+mod storage {
+    use super::*;
 
-    fn iter_entries(&'a self) -> impl Iterator<Item=&'a [T]> + 'a {
-        self.bins.iter().map(|b| b.as_slice())
-    }
+    impl<
+            'a,
+            T: IndexSortable + Default + ArrowStorage + 'a,
+            P: IndexSortable + Default + ArrowStorage + 'a,
+        > IndexBinaryStorage<'a, T, P, IndexMetadata> for SearchIndex<T, P>
+    {
+        fn parents(&self) -> &[P] {
+            self.parents.as_slice()
+        }
 
-    fn to_metadata(&self) -> IndexMetadata {
-        IndexMetadata {
-            bins_per_dalton: self.bins_per_dalton,
-            max_item_mass: self.max_item_mass,
+        fn iter_entries(&'a self) -> impl Iterator<Item = &'a [T]> + 'a {
+            self.bins.iter().map(|b| b.as_slice())
+        }
+
+        fn to_metadata(&self) -> IndexMetadata {
+            IndexMetadata {
+                bins_per_dalton: self.bins_per_dalton,
+                max_item_mass: self.max_item_mass,
+            }
+        }
+
+        fn from_components(
+            metadata: IndexMetadata,
+            parents: Vec<P>,
+            entries: HashMap<u64, Vec<T>>,
+        ) -> Self {
+            let mut parents = IndexBin::from(parents);
+            parents.assume_sorted(SortType::ByMass);
+            let mut this = Self::empty(metadata.bins_per_dalton, metadata.max_item_mass);
+            this.parents = parents;
+            entries.into_iter().for_each(|(k, b)| {
+                let mut bin = IndexBin::from(b);
+                bin.assume_sorted(SortType::ByParentId);
+                this.bins[k as usize] = bin;
+            });
+            this
         }
     }
 
-    fn from_components(metadata: IndexMetadata, parents: Vec<P>, entries: HashMap<u64, Vec<T>>) -> Self {
-        let mut parents = IndexBin::from(parents);
-        parents.assume_sorted(SortType::ByMass);
-        let mut this = Self::empty(metadata.bins_per_dalton, metadata.max_item_mass);
-        this.parents = parents;
-        entries.into_iter().for_each(|(k, b)| {
-            let mut bin = IndexBin::from(b);
-            bin.assume_sorted(SortType::ByParentId);
-            this.bins[k as usize] = bin;
-        });
-        this
+    impl<
+            'a,
+            T: IndexSortable + Default + ArrowStorage + 'a + Clone,
+            P: IndexSortable + Default + ArrowStorage + 'a,
+        > SplitIndexBinaryStorage<'a, T, P, IndexMetadata> for SearchIndex<T, P>
+    {
+    }
+
+    impl<
+            'a,
+            T: IndexSortable + Default + ArrowStorage + 'a,
+            P: IndexSortable + Default + ArrowStorage + 'a,
+        > SearchIndex<T, P>
+    {
+        pub fn write_parquet<D: AsRef<std::path::Path>>(
+            &'a self,
+            directory: &D,
+            compression_level: Option<parquet::basic::Compression>,
+        ) -> io::Result<()> {
+            self.write(directory, compression_level)
+        }
+
+        pub fn read_parquet<D: AsRef<std::path::Path>>(directory: &D) -> io::Result<Self> {
+            Self::read(directory)
+        }
+    }
+
+    impl<
+            'a,
+            T: IndexSortable + Default + ArrowStorage + 'a + Clone,
+            P: IndexSortable + Default + ArrowStorage + 'a,
+        > SearchIndex<T, P>
+    {
+        pub fn write_banded_parquet<D: AsRef<std::path::Path>>(
+            &'a self,
+            directory: &D,
+            bin_width: f32,
+            compression_level: Option<parquet::basic::Compression>,
+        ) -> io::Result<()> {
+            self.write_split(directory, bin_width, compression_level)
+        }
+
+        pub fn read_banded_parquet<D: AsRef<std::path::Path>>(directory: &D) -> io::Result<Self> {
+            Self::read_split(directory)
+        }
     }
 }
-
-
-#[cfg(feature = "binary_storage")]
-impl<'a, T: IndexSortable + Default + ArrowStorage + 'a, P: IndexSortable + Default + ArrowStorage + 'a> SearchIndex<T, P> {
-    pub fn write_parquet<D: AsRef<std::path::Path>>(
-        &'a self,
-        directory: &D,
-        compression_level: Option<parquet::basic::Compression>,
-    ) -> io::Result<()> {
-        self.write(directory, compression_level)
-    }
-
-    pub fn read_parquet<D: AsRef<std::path::Path>>(
-        directory: &D,
-    ) -> io::Result<Self> {
-        Self::read(directory)
-    }
-}
-
 
 pub struct SearchIndexBinIter<'a, T: IndexSortable + Default, P: IndexSortable + Default> {
     index: &'a SearchIndex<T, P>,

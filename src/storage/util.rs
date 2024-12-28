@@ -140,6 +140,55 @@ impl ArrowStorage for IndexMetadata {
 }
 
 pub trait IndexBinaryStorage<'a, T: ArrowStorage + 'a, P: ArrowStorage, M: ArrowStorage> {
+    fn write_metadata(&self, directory: &Path) -> io::Result<()> {
+        let metadata = self.to_metadata();
+        let meta_path = directory.join(M::archive_name());
+        let meta_schema = M::schema();
+        let meta_fh = io::BufWriter::new(fs::File::create(meta_path)?);
+        let mut writer = LineDelimitedWriter::new(meta_fh);
+        let metadata = M::to_batch(&[metadata], meta_schema, 0).unwrap();
+
+        writer.write(&metadata).unwrap();
+        writer.finish().unwrap();
+        Ok(())
+    }
+
+    fn write_parents(&self, directory: &Path, compression_level: &Compression) -> io::Result<()> {
+        let parent_path = directory.join(P::archive_name());
+        let parent_schema = P::schema();
+        let props = P::writer_properties()
+            .set_compression(compression_level.clone())
+            .build();
+        let mut writer = ArrowWriter::try_new(
+            fs::File::create(parent_path)?,
+            parent_schema.clone(),
+            Some(props),
+        )?;
+        let batch = P::to_batch(self.parents(), parent_schema.clone(), 0).unwrap();
+        writer.write(&batch)?;
+        writer.close()?;
+        Ok(())
+    }
+
+    fn write_entries(&'a self, directory: &Path, compression_level: &Compression) -> io::Result<()> {
+        let entries_path = directory.join(T::archive_name());
+        let entries_schema = T::schema();
+        let props = T::writer_properties()
+            .set_compression(compression_level.clone())
+            .build();
+        let mut writer = ArrowWriter::try_new(
+            fs::File::create(entries_path)?,
+            entries_schema.clone(),
+            Some(props),
+        )?;
+        for (i, bin) in self.iter_entries().enumerate() {
+            let batch = T::to_batch(bin, entries_schema.clone(), i as u64).unwrap();
+            writer.write(&batch)?;
+        }
+        writer.close()?;
+        Ok(())
+    }
+
     fn write<D: AsRef<Path>>(
         &'a self,
         directory: &D,
@@ -150,51 +199,9 @@ pub trait IndexBinaryStorage<'a, T: ArrowStorage + 'a, P: ArrowStorage, M: Arrow
         let compression_level =
             compression_level.unwrap_or_else(|| Compression::ZSTD(ZstdLevel::try_new(9).unwrap()));
 
-        {
-            let metadata = self.to_metadata();
-            let meta_path = directory.join(M::archive_name());
-            let meta_schema = M::schema();
-            let meta_fh = io::BufWriter::new(fs::File::create(meta_path)?);
-            let mut writer = LineDelimitedWriter::new(meta_fh);
-            let metadata = M::to_batch(&[metadata], meta_schema, 0).unwrap();
-
-            writer.write(&metadata).unwrap();
-            writer.finish().unwrap();
-        }
-
-        {
-            let parent_path = directory.join(P::archive_name());
-            let parent_schema = P::schema();
-            let props = P::writer_properties()
-                .set_compression(compression_level.clone())
-                .build();
-            let mut writer = ArrowWriter::try_new(
-                fs::File::create(parent_path)?,
-                parent_schema.clone(),
-                Some(props),
-            )?;
-            let batch = P::to_batch(self.parents(), parent_schema.clone(), 0).unwrap();
-            writer.write(&batch)?;
-            writer.close()?;
-        }
-
-        {
-            let entries_path = directory.join(T::archive_name());
-            let entries_schema = T::schema();
-            let props = T::writer_properties()
-                .set_compression(compression_level.clone())
-                .build();
-            let mut writer = ArrowWriter::try_new(
-                fs::File::create(entries_path)?,
-                entries_schema.clone(),
-                Some(props),
-            )?;
-            for (i, bin) in self.iter_entries().enumerate() {
-                let batch = T::to_batch(bin, entries_schema.clone(), i as u64).unwrap();
-                writer.write(&batch)?;
-            }
-            writer.close()?;
-        }
+        self.write_metadata(directory)?;
+        self.write_parents(directory, &compression_level)?;
+        self.write_entries(directory, &compression_level)?;
 
         Ok(())
     }

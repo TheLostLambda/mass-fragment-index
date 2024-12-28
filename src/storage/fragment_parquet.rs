@@ -29,30 +29,12 @@ use parquet::basic::Compression;
 use parquet::basic::ZstdLevel;
 use parquet::{arrow::ArrowWriter, file::properties::*};
 
-use super::util::ArrowStorage;
+use super::util::{ArrowStorage, afield, as_array_ref, field_of};
 use crate::index::SearchIndex;
 use crate::sort::IndexBin;
 use crate::sort::SortType;
 use crate::Fragment;
 use crate::Peptide;
-
-macro_rules! afield {
-    ($name:expr, $ctype:expr) => {
-        Arc::new(Field::new($name, $ctype, false))
-    };
-}
-
-macro_rules! as_array_ref {
-    ($a:expr) => {
-        Arc::new($a.finish()) as ArrayRef
-    };
-}
-
-macro_rules! field_of {
-    ($batch:expr, $name:expr) => {
-        $batch.column_by_name($name).unwrap()
-    };
-}
 
 pub fn make_fragment_schema() -> Arc<Schema> {
     let mass = afield!("mass", DataType::Float32);

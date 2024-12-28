@@ -27,24 +27,7 @@ use crate::sort::SortType;
 use crate::{parent::Spectrum, peak::DeconvolutedPeak};
 
 use super::ArrowStorage;
-
-macro_rules! afield {
-    ($name:expr, $ctype:expr) => {
-        Arc::new(Field::new($name, $ctype, false))
-    };
-}
-
-macro_rules! as_array_ref {
-    ($a:expr) => {
-        Arc::new($a.finish()) as ArrayRef
-    };
-}
-
-macro_rules! field_of {
-    ($batch:expr, $name:expr) => {
-        $batch.column_by_name($name).unwrap()
-    };
-}
+use super::util::{afield, as_array_ref, field_of};
 
 pub fn make_peak_schema() -> Arc<Schema> {
     let mass = afield!("mass", DataType::Float32);
