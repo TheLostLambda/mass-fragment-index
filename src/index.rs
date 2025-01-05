@@ -164,6 +164,8 @@ impl<T: IndexSortable + Default, P: IndexSortable + Default> SearchIndex<T, P> {
 
 #[cfg(feature = "binary_storage")]
 mod storage {
+    use crate::storage::{SplitStorageOptions, SplitArrowStorage};
+
     use super::*;
 
     impl<
@@ -207,7 +209,7 @@ mod storage {
 
     impl<
             'a,
-            T: IndexSortable + Default + ArrowStorage + 'a + Clone,
+            T: IndexSortable + Default + ArrowStorage + 'a + Clone + SplitArrowStorage,
             P: IndexSortable + Default + ArrowStorage + 'a,
         > SplitIndexBinaryStorage<'a, T, P, IndexMetadata> for SearchIndex<T, P>
     {
@@ -234,17 +236,17 @@ mod storage {
 
     impl<
             'a,
-            T: IndexSortable + Default + ArrowStorage + 'a + Clone,
+            T: IndexSortable + Default + ArrowStorage + 'a + Clone + SplitArrowStorage,
             P: IndexSortable + Default + ArrowStorage + 'a,
         > SearchIndex<T, P>
     {
         pub fn write_banded_parquet<D: AsRef<std::path::Path>>(
             &'a self,
             directory: &D,
-            bin_width: f32,
+            bin_options: SplitStorageOptions,
             compression_level: Option<parquet::basic::Compression>,
         ) -> io::Result<()> {
-            self.write_split(directory, bin_width, compression_level)
+            self.write_split(directory, bin_options, compression_level)
         }
 
         pub fn read_banded_parquet<D: AsRef<std::path::Path>>(directory: &D) -> io::Result<Self> {

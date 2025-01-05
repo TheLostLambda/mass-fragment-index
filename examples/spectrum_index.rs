@@ -3,11 +3,12 @@ use std::{env, io, path::PathBuf};
 use mzdata::{io::DetailLevel, prelude::*, MzMLReader};
 
 use mass_fragment_index::{
-    sort::SortType,
-    DeconvolutedPeak, DeconvolutedSpectrumIndex, Spectrum,
+    sort::SortType, storage::SplitStorageOptions, DeconvolutedPeak, DeconvolutedSpectrumIndex, Spectrum
 };
 
 fn main() -> io::Result<()> {
+    pretty_env_logger::init_timed();
+
     let mut args = env::args().skip(1);
 
     let mzml_path = args
@@ -82,7 +83,7 @@ fn main() -> io::Result<()> {
     eprintln!("Writing index");
 
     // index.write_parquet(&storage_dir, None)?;
-    index.write_banded_parquet(&storage_dir, 50.0, None)?;
+    index.write_banded_parquet(&storage_dir, SplitStorageOptions::default(), None)?;
 
     let iv = index.parents_for_range(1200.0, 2300.0, mass_fragment_index::Tolerance::Da(0.2));
 

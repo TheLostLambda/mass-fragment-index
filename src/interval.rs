@@ -28,6 +28,10 @@ impl Interval {
     pub fn len(&self) -> usize {
         self.end - self.start
     }
+
+    pub fn overlaps(&self, interval: &Interval) -> bool {
+        self.end > interval.start && interval.end > self.start
+    }
 }
 
 

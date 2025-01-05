@@ -1,8 +1,7 @@
 use std::{
     collections::HashMap,
     fs, io,
-    marker::PhantomData,
-    path::{Path, PathBuf},
+    path::Path,
     sync::Arc,
 };
 
@@ -18,7 +17,7 @@ use parquet::{
     file::properties::{WriterProperties, WriterPropertiesBuilder},
 };
 
-use crate::{IndexSortable, Interval, MassType, SearchIndex, Tolerance};
+use crate::MassType;
 
 pub trait ArrowStorage: Sized {
     fn schema() -> SchemaRef;
@@ -269,99 +268,5 @@ pub trait IndexBinaryStorage<'a, T: ArrowStorage + 'a, P: ArrowStorage, M: Arrow
 
         let this = Self::from_components(metadata, parents, entries);
         Ok(this)
-    }
-}
-
-#[derive(Debug)]
-pub struct SearchIndexOnDisk<
-    T: ArrowStorage + IndexSortable + Default,
-    P: ArrowStorage + IndexSortable + Default,
-    M: ArrowStorage + Default,
-> {
-    root: PathBuf,
-    pub metadata: M,
-    _t: PhantomData<T>,
-    _p: PhantomData<P>,
-    _index: PhantomData<SearchIndex<T, P>>,
-}
-
-#[allow(unused)]
-impl<
-        T: ArrowStorage + IndexSortable + Default,
-        P: ArrowStorage + IndexSortable + Default,
-        M: ArrowStorage + Default,
-    > SearchIndexOnDisk<T, P, M>
-{
-    pub fn new(path: PathBuf) -> io::Result<Self> {
-        if !path.exists() {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("Index root {} not found", path.display()),
-            ));
-        }
-        if !path.join(M::archive_name()).exists() {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("Index metadata {} not found", path.display()),
-            ));
-        }
-        if !path.join(P::archive_name()).exists() {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("Index parent file {} not found", path.display()),
-            ));
-        }
-        if !path.join(T::archive_name()).exists() {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("Index search target file {} not found", path.display()),
-            ));
-        }
-        let mut this = Self {
-            root: path,
-            metadata: M::default(),
-            _t: PhantomData,
-            _p: PhantomData,
-            _index: PhantomData,
-        };
-        this.metadata = this.read_metadata()?;
-        Ok(this)
-    }
-
-    fn read_metadata(&self) -> io::Result<M> {
-        let arch = self.root.join(M::archive_name());
-        let handle = io::BufReader::new(fs::File::open(arch)?);
-        let mut reader = JSONReaderBuilder::new(M::schema())
-            .build(handle)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-        let (meta, _) = M::from_batch(
-            &reader
-                .next()
-                .expect("No metadata record batch found")
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?,
-            M::schema(),
-        )
-        .next()
-        .unwrap();
-        Ok(meta)
-    }
-
-    pub fn parents_for(&self, mass: MassType, error_tolerance: Tolerance) -> Interval {
-        // let iv = self.parents.search_mass(mass, error_tolerance);
-        // iv
-        todo!()
-    }
-
-    pub fn parents_for_range(
-        &self,
-        low: MassType,
-        high: MassType,
-        error_tolerance: Tolerance,
-    ) -> Interval {
-        // let mut out = Interval::default();
-        // out.start = self.parents_for(low, error_tolerance).start;
-        // out.end = self.parents_for(high, error_tolerance).end;
-        // out
-        todo!()
     }
 }

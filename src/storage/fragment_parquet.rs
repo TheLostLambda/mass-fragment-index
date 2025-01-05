@@ -30,6 +30,7 @@ use parquet::basic::ZstdLevel;
 use parquet::{arrow::ArrowWriter, file::properties::*};
 
 use super::util::{ArrowStorage, afield, as_array_ref, field_of};
+use super::SplitArrowStorage;
 use crate::index::SearchIndex;
 use crate::sort::IndexBin;
 use crate::sort::SortType;
@@ -449,3 +450,7 @@ pub fn read_fragment_index<P: AsRef<Path>>(
     index.sort(SortType::ByParentId);
     Ok(index)
 }
+
+
+impl SplitArrowStorage for Fragment {}
+impl SplitArrowStorage for Peptide {}

@@ -23,6 +23,7 @@ rand = "0.8.5"
 rayon = { version = "1.10.0"}
 mzdata = { version = "0.20.0" }
 tempfile = "3.10"
+pretty_env_logger = "0.5.0"
 
 [features]
 default = ["binary_storage", "parallelism"]
@@ -36,3 +37,4 @@ arrow = { version = "52.2.0", optional = true}
 parquet ={ version = "52.2.0", features = ["zstd", "arrow"], optional = true}
 itertools = "0.13.0"
 rayon = { version = "1.10.0", optional = true}
+log = "0.4.22"

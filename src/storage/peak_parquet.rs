@@ -26,7 +26,7 @@ use crate::sort::IndexBin;
 use crate::sort::SortType;
 use crate::{parent::Spectrum, peak::DeconvolutedPeak};
 
-use super::ArrowStorage;
+use super::{ArrowStorage, SplitArrowStorage};
 use super::util::{afield, as_array_ref, field_of};
 
 pub fn make_peak_schema() -> Arc<Schema> {
@@ -460,3 +460,7 @@ pub fn read_peak_index<P: AsRef<Path>>(
     index.sort(SortType::ByParentId);
     Ok(index)
 }
+
+
+impl SplitArrowStorage for DeconvolutedPeak {}
+impl SplitArrowStorage for Spectrum {}
