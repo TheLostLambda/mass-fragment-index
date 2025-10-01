@@ -211,12 +211,12 @@ impl<T: IndexSortable> IndexBin<T> {
         self.entries.is_empty()
     }
 
-    pub fn iter(&self) -> std::slice::Iter<T> {
+    pub fn iter(&self) -> std::slice::Iter<'_, T> {
         self.entries.iter()
     }
 
     #[allow(unused)]
-    pub(crate) fn iter_mut(&mut self) -> std::slice::IterMut<T> {
+    pub(crate) fn iter_mut(&mut self) -> std::slice::IterMut<'_, T> {
         self.entries.iter_mut()
     }
 
