@@ -1,5 +1,9 @@
 use std::{
-    error::Error, fmt::Display, iter::FusedIterator, ops::{Index, Mul}, str::FromStr
+    error::Error,
+    fmt::Display,
+    iter::FusedIterator,
+    ops::{Index, Mul},
+    str::FromStr,
 };
 
 #[cfg(feature = "serde")]
@@ -405,7 +409,6 @@ impl<'a, T: IndexSortable> ParentSortedIndexBinSearchIter<'a, T> {
         None
     }
 }
-
 
 #[cfg(test)]
 mod test {
